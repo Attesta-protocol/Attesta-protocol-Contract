@@ -1,0 +1,17 @@
+[package]
+name = "attesta-circuits"
+description = "Groth16 circuits (arkworks) for Attesta: transfer, withdraw, attestation"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# M1 (in progress): arkworks proving stack. Pinned when the first circuit
+# lands, together with its written soundness argument.
+# ark-bls12-381 = "0.5"
+# ark-groth16 = "0.5"
+# ark-relations = "0.5"
+# ark-r1cs-std = "0.5"
+
+[dev-dependencies]

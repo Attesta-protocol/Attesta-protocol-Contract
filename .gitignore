@@ -1,0 +1,9 @@
+target/
+Cargo.lock
+!contracts/Cargo.lock
+!circuits/Cargo.lock
+*.wasm
+.env
+.stellar/
+.soroban/
+node_modules/
