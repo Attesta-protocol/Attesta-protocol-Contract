@@ -45,6 +45,28 @@ Two products, one cryptographic foundation:
 - Anchors are natural attestation issuers. They already KYC users under SEP-12; Attesta lets that verification become portable and privacy-preserving instead of being repeated per-app.
 - Sub-cent fees and fast finality make per-payment proof verification economically sane in a way it is not on Ethereum L1.
 
+## Repository Structure
+
+```
+contracts/                    Soroban workspace (Rust, soroban-sdk 27)
+├── zk_verifier/              Groth16 verification over BLS12-381; one instance
+│                             per circuit, verifying key immutable per instance
+├── shielded_pool/            Per-token confidential value: commitments,
+│                             nullifiers, incremental Merkle tree, optional
+│                             attestation gate on entry
+├── attestation_registry/     present() proofs over issuer credentials;
+│                             check() one-call integration; revocation
+├── issuer_registry/          Governance-curated issuers with timelocked,
+│                             evented add/remove/rotate-key
+└── interfaces/               Shared types + cross-contract clients —
+                              what integrators depend on
+circuits/                     Groth16 circuits (arkworks) — M1, in progress;
+                              public-input layouts + ceremony tooling live here
+COMPLIANCE.md                 The selective-disclosure model, for legal teams
+SECURITY.md                   Disclosure policy + protocol invariants
+CONTRIBUTING.md               Dev setup, PR checklist, issue taxonomy
+```
+
 ## Architecture
 
 ```
@@ -73,16 +95,23 @@ Two products, one cryptographic foundation:
 ## Part 1 — Contract Layer
 
 **Directory:** [`/contracts`](./contracts)
-**Stack:** Rust, `soroban-sdk`, Protocol 25 BLS12-381 host functions
+**Stack:** Rust, `soroban-sdk` 27, Protocol 25 BLS12-381 host functions
+
+All four contracts below are implemented and tested (29 tests, wasm builds
+clean); see [`contracts/README.md`](./contracts/README.md) for the
+deployment topology. The transfer/withdraw/attestation circuits they verify
+against are M1 work in progress under [`circuits/`](./circuits) — until
+they land, the Merkle hash is a documented SHA-256 placeholder and all
+verifying keys are development keys.
 
 ### 1. `shielded_pool` — confidential value
 
 | Function | Purpose |
 | --- | --- |
-| `deposit(from, token, amount, commitment)` | Public → shielded: locks tokens, inserts note commitment into the Merkle tree |
-| `transfer(proof, nullifiers, new_commitments, encrypted_notes)` | Shielded transfer: verifies the ZK proof (balance preserved, notes owned, no double-spend), spends nullifiers, inserts new commitments, emits encrypted notes for the recipient |
-| `withdraw(proof, nullifier, to, amount)` | Shielded → public: exits the pool with a validity proof |
-| `root()` / `is_spent(nullifier)` | Public state queries for provers and indexers |
+| `deposit(from, token, amount, commitment)` | Public → shielded: locks tokens, inserts note commitment into the Merkle tree (checks the attestation gate if the pool is gated) |
+| `transfer(proof, nullifiers, new_commitments, encrypted_notes, root)` | Shielded transfer: verifies the ZK proof (balance preserved, notes owned, no double-spend) against a recent root, spends nullifiers, inserts new commitments, emits encrypted notes for the recipient |
+| `withdraw(proof, nullifier, to, amount, root)` | Shielded → public: exits the pool with a validity proof bound to the recipient, so a relayer cannot redirect funds |
+| `root()` / `is_known_root(root)` / `is_spent(nullifier)` / `size()` | Public state queries for provers and indexers |
 
 **Design:** Pedersen commitments over note values; incremental Merkle tree of commitments; nullifier set prevents double-spends; per-token pools (USDC pool, EURC pool) so value can never cross assets invisibly. Total pool balance is always publicly auditable — the contract's token balance must equal the sum of shielded notes, so insolvency or inflation bugs are externally detectable even though individual amounts are hidden.
 
@@ -97,9 +126,18 @@ Two products, one cryptographic foundation:
 
 | Function | Purpose |
 | --- | --- |
-| `present(proof, claim_type, context)` | User presents a ZK proof over an issuer credential; on success, records a scoped, time-boxed attestation for their address |
+| `present(user, proof, claim_type, context, issuer_key, credential_ref, expires_at)` | User presents a ZK proof over an issuer credential; on success, records a scoped, time-boxed attestation for their address |
 | `check(address, claim_type)` | The one-call integration for every other Stellar app: returns whether a valid attestation of this type is active |
 | `revoke_credential(issuer, credential_ref)` | Issuer-driven revocation (compromised or invalidated credentials), propagated into proof validity |
+
+Integrating from any Soroban contract is one dependency and one call:
+
+```rust
+use attesta_interfaces::{AttestationClient, ClaimType};
+
+let ok = AttestationClient::new(&env, &attesta_registry)
+    .check(&user, &ClaimType::KycLevel(2));
+```
 
 Claim types are an extensible enum: `KycLevel(n)`, `Jurisdiction(allowed_set)`, `IncomeAbove(threshold)`, `Accredited`, with a registry process for adding new types.
 
@@ -140,6 +178,14 @@ Every issue carries a layer label, difficulty label, and acceptance criteria. An
 
 ### Development setup
 
+Prerequisites: Rust (stable) with the `wasm32v1-none` target, and the
+[Stellar CLI](https://developers.stellar.org/docs/tools/cli):
+
+```bash
+rustup target add wasm32v1-none
+cargo install --locked stellar-cli
+```
+
 ```bash
 # Contracts
 cd contracts && cargo test && stellar contract build
@@ -147,6 +193,10 @@ cd contracts && cargo test && stellar contract build
 # Circuits (arkworks toolchain)
 cd circuits && cargo test && ./scripts/build-artifacts.sh
 ```
+
+> **Note:** build with the committed `contracts/Cargo.lock`. It pins
+> `ed25519-dalek` to 2.x — `soroban-env-host 27.0.0` declares `>= 2.0.0`
+> but does not compile against 3.0.0.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for testnet setup, local proving, and the PR checklist.
 
