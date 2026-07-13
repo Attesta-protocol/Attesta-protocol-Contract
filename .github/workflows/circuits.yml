@@ -1,0 +1,54 @@
+name: circuits
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: circuits
+
+jobs:
+  check:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: circuits
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: test (release — Groth16 e2e proves for real)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: circuits
+      - run: cargo test --release
+
+  reproducible-artifacts:
+    name: artifacts regenerate byte-identically
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: circuits
+      # The committed artifacts (and the generated Poseidon constants in
+      # the contract layer) must be exactly what the pipeline produces
+      # from the committed sources — the reproducibility promise in
+      # circuits/CONTRIBUTING.md, enforced.
+      - run: ./scripts/build-artifacts.sh
+      - name: verify no drift
+        working-directory: .
+        run: git diff --exit-code
