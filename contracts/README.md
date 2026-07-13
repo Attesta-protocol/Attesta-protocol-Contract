@@ -27,10 +27,24 @@ issuer_registry ◄── attestation_registry ◄── shielded_pool (optional
 Deploy order: verifiers (with their published verifying keys) →
 `issuer_registry` → `attestation_registry` → `shielded_pool` per token.
 
+## The pinned protocol hash
+
+The pool's Merkle tree hashes with the protocol Poseidon instance over
+the BLS12-381 scalar field, computed via the Fr host functions — the
+same function the transfer/withdraw circuits evaluate in-circuit. Its
+constants (`shielded_pool/src/poseidon_params.rs`) are **generated**
+from [`circuits/`](../circuits) by `circuits/scripts/build-artifacts.sh`;
+never edit them here. The lockstep is enforced by a committed test
+vector plus an end-to-end test (`shielded_pool/src/test_e2e.rs`) that
+runs deposit → shielded transfer → withdraw against real `ZkVerifier`
+instances with real Groth16 proofs and asserts the on-chain root equals
+the prover-side tree root after every insertion.
+
 ## Commands
 
 ```bash
-cargo test               # native unit + integration tests
+cargo test               # native unit + integration tests (the e2e
+                         # tests generate real proofs; first run is slow)
 cargo fmt --all          # format
 cargo clippy --all-targets
 stellar contract build   # wasm for deployment (target/wasm32v1-none/release)

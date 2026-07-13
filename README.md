@@ -52,16 +52,19 @@ contracts/                    Soroban workspace (Rust, soroban-sdk 27)
 ├── zk_verifier/              Groth16 verification over BLS12-381; one instance
 │                             per circuit, verifying key immutable per instance
 ├── shielded_pool/            Per-token confidential value: commitments,
-│                             nullifiers, incremental Merkle tree, optional
-│                             attestation gate on entry
+│                             nullifiers, incremental Poseidon Merkle tree,
+│                             optional attestation gate on entry
 ├── attestation_registry/     present() proofs over issuer credentials;
 │                             check() one-call integration; revocation
 ├── issuer_registry/          Governance-curated issuers with timelocked,
 │                             evented add/remove/rotate-key
 └── interfaces/               Shared types + cross-contract clients —
                               what integrators depend on
-circuits/                     Groth16 circuits (arkworks) — M1, in progress;
-                              public-input layouts + ceremony tooling live here
+circuits/                     Groth16 circuits (arkworks): transfer + withdraw
+├── src/                      implemented, with per-circuit soundness docs
+├── docs/                     under docs/; attest_* circuits are M5
+├── artifacts/                Reproducible dev keys + host-encoded VKs
+└── ceremony/                 The published trusted-setup plan
 COMPLIANCE.md                 The selective-disclosure model, for legal teams
 SECURITY.md                   Disclosure policy + protocol invariants
 CONTRIBUTING.md               Dev setup, PR checklist, issue taxonomy
@@ -97,12 +100,17 @@ CONTRIBUTING.md               Dev setup, PR checklist, issue taxonomy
 **Directory:** [`/contracts`](./contracts)
 **Stack:** Rust, `soroban-sdk` 27, Protocol 25 BLS12-381 host functions
 
-All four contracts below are implemented and tested (29 tests, wasm builds
-clean); see [`contracts/README.md`](./contracts/README.md) for the
-deployment topology. The transfer/withdraw/attestation circuits they verify
-against are M1 work in progress under [`circuits/`](./circuits) — until
-they land, the Merkle hash is a documented SHA-256 placeholder and all
-verifying keys are development keys.
+All four contracts below are implemented and tested (wasm builds clean);
+see [`contracts/README.md`](./contracts/README.md) for the deployment
+topology. The transfer and withdraw circuits they verify against are
+implemented under [`circuits/`](./circuits) with written soundness
+arguments, and the two layers are tested against each other for real:
+the full deposit → shielded transfer → withdraw flow runs in the
+contract test suite with nothing mocked — real Groth16 proofs verified
+through the BLS12-381 host functions, over the Poseidon Merkle hash now
+pinned identically in-circuit and on-chain. Verifying keys remain
+development keys until the [public setup ceremony](./circuits/ceremony)
+runs; the attestation circuits are M5.
 
 ### 1. `shielded_pool` — confidential value
 
@@ -153,7 +161,7 @@ Claim types are an extensible enum: `KycLevel(n)`, `Jurisdiction(allowed_set)`, 
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
-| **M1 — Circuits + verifier on testnet** | Transfer/withdraw circuits, Groth16 verification via BLS12-381 host functions, published trusted-setup plan | 🔨 In progress |
+| **M1 — Circuits + verifier on testnet** | Transfer/withdraw circuits, Groth16 verification via BLS12-381 host functions, published trusted-setup plan | 🟢 Code complete — circuits, on-chain verification, e2e tests, and the [setup plan](./circuits/ceremony) landed; testnet deployment remains |
 | **M2 — Shielded pool MVP** | Deposit/transfer/withdraw on testnet (USDC), indexer + note relay, CLI prover | Planned |
 | **M3 — WASM prover + wallet UI** | Browser proving, pay/receive surfaces, viewing keys + local history | Planned |
 | **M4 — Selective disclosure** | Scoped viewing keys, auditor portal, disclosure CLI | Planned |
