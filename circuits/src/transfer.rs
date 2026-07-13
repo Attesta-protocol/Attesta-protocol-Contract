@@ -104,9 +104,7 @@ impl ConstraintSynthesizer<Fr> for TransferCircuit {
         let nullifiers = self
             .nullifiers
             .iter()
-            .map(|nf| {
-                FpVar::new_input(cs.clone(), || nf.ok_or(SynthesisError::AssignmentMissing))
-            })
+            .map(|nf| FpVar::new_input(cs.clone(), || nf.ok_or(SynthesisError::AssignmentMissing)))
             .collect::<Result<Vec<_>, _>>()?;
         let new_commitments = self
             .new_commitments
@@ -375,8 +373,7 @@ mod tests {
         };
         // Fix second output commitment for the zero-value note.
         let mut circuit = circuit;
-        circuit.new_commitments[1] =
-            Some(circuit.created[1].as_ref().unwrap().commitment());
+        circuit.new_commitments[1] = Some(circuit.created[1].as_ref().unwrap().commitment());
         assert!(is_satisfied(circuit));
     }
 }

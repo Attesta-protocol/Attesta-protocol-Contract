@@ -330,8 +330,7 @@ fn poseidon_matches_circuit_vector() {
         &BytesN::from_array(&env, &one),
         &BytesN::from_array(&env, &two),
     );
-    let expected =
-        hex_literal("28ce19420fc246a05553ad1e8c98f5c9d67166be2c18e9e4cb4b4e317dd2a78a");
+    let expected = hex_literal("28ce19420fc246a05553ad1e8c98f5c9d67166be2c18e9e4cb4b4e317dd2a78a");
     assert_eq!(h, BytesN::from_array(&env, &expected));
 }
 

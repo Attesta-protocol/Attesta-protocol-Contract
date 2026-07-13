@@ -118,7 +118,11 @@ fn emit_circuit(
     // Host-encoded VK: the exact bytes a zk_verifier is constructed with.
     let host_vk = vk_to_bytes(vk);
     let mut hex_out = String::new();
-    writeln!(hex_out, "# {name} verifying key, Soroban host encoding (DEV)").unwrap();
+    writeln!(
+        hex_out,
+        "# {name} verifying key, Soroban host encoding (DEV)"
+    )
+    .unwrap();
     writeln!(hex_out, "alpha={}", hex::encode(host_vk.alpha)).unwrap();
     writeln!(hex_out, "beta={}", hex::encode(host_vk.beta)).unwrap();
     writeln!(hex_out, "gamma={}", hex::encode(host_vk.gamma)).unwrap();
@@ -178,7 +182,12 @@ fn emit_poseidon_params(root: &Path) {
         "/// Full rounds (half before, half after the partial rounds)."
     )
     .unwrap();
-    writeln!(out, "pub const FULL_ROUNDS: usize = {};", poseidon::FULL_ROUNDS).unwrap();
+    writeln!(
+        out,
+        "pub const FULL_ROUNDS: usize = {};",
+        poseidon::FULL_ROUNDS
+    )
+    .unwrap();
     writeln!(out, "/// Partial rounds.").unwrap();
     writeln!(
         out,
@@ -241,6 +250,13 @@ fn emit_poseidon_params(root: &Path) {
     writeln!(out, "];").unwrap();
 
     fs::write(&out_path, out).unwrap();
+
+    // Normalize with rustfmt so `cargo fmt --all` in the contracts
+    // workspace never diverges from freshly generated output.
+    let _ = std::process::Command::new("rustfmt")
+        .arg("--edition=2021")
+        .arg(&out_path)
+        .status();
 
     // Cross-check vector so the contract can pin hash2(1, 2).
     let h = poseidon::hash2(Fr::from(1u64), Fr::from(2u64));

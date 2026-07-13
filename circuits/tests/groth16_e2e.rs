@@ -22,12 +22,11 @@ fn rng() -> ChaCha20Rng {
 #[test]
 fn transfer_proof_verifies_and_tampering_fails() {
     let mut rng = rng();
-    let (pk, vk) =
-        Groth16::<ark_bls12_381::Bls12_381>::circuit_specific_setup(
-            TransferCircuit::blank(DEPTH, 2, 2),
-            &mut rng,
-        )
-        .unwrap();
+    let (pk, vk) = Groth16::<ark_bls12_381::Bls12_381>::circuit_specific_setup(
+        TransferCircuit::blank(DEPTH, 2, 2),
+        &mut rng,
+    )
+    .unwrap();
 
     // 600 + 400 in, 750 + 250 out.
     let sk1 = Fr::from(11u64);
@@ -86,16 +85,12 @@ fn transfer_proof_verifies_and_tampering_fails() {
     };
 
     let proof = Groth16::<ark_bls12_381::Bls12_381>::prove(&pk, circuit, &mut rng).unwrap();
-    assert!(
-        Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &public_inputs, &proof).unwrap()
-    );
+    assert!(Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &public_inputs, &proof).unwrap());
 
     // Any tampered statement must fail: try swapping a nullifier.
     let mut tampered = public_inputs.clone();
     tampered[1] = Fr::from(31337u64);
-    assert!(
-        !Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &tampered, &proof).unwrap()
-    );
+    assert!(!Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &tampered, &proof).unwrap());
 }
 
 #[test]
@@ -135,14 +130,10 @@ fn withdraw_proof_verifies_and_recipient_swap_fails() {
     };
 
     let proof = Groth16::<ark_bls12_381::Bls12_381>::prove(&pk, circuit, &mut rng).unwrap();
-    assert!(
-        Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &public_inputs, &proof).unwrap()
-    );
+    assert!(Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &public_inputs, &proof).unwrap());
 
     // A relayer redirecting the exit changes public input 2 → invalid.
     let mut redirected = public_inputs.clone();
     redirected[2] = Fr::from(6666u64);
-    assert!(
-        !Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &redirected, &proof).unwrap()
-    );
+    assert!(!Groth16::<ark_bls12_381::Bls12_381>::verify(&vk, &redirected, &proof).unwrap());
 }

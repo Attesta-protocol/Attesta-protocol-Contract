@@ -82,11 +82,11 @@ pub mod gadget {
     }
 
     /// `nf = H(H(DOMAIN_NF, sk), leaf_index)`.
-    pub fn nullifier(
-        sk: &FpVar<Fr>,
-        leaf_index: &FpVar<Fr>,
-    ) -> Result<FpVar<Fr>, SynthesisError> {
-        hash2(&hash2(&FpVar::Constant(Fr::from(DOMAIN_NF)), sk)?, leaf_index)
+    pub fn nullifier(sk: &FpVar<Fr>, leaf_index: &FpVar<Fr>) -> Result<FpVar<Fr>, SynthesisError> {
+        hash2(
+            &hash2(&FpVar::Constant(Fr::from(DOMAIN_NF)), sk)?,
+            leaf_index,
+        )
     }
 }
 

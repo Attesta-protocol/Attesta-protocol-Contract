@@ -146,8 +146,7 @@ pub mod gadget {
             } else {
                 state[0] = sbox(&state[0])?;
             }
-            let mut mixed: [FpVar<Fr>; WIDTH] =
-                [FpVar::zero(), FpVar::zero(), FpVar::zero()];
+            let mut mixed: [FpVar<Fr>; WIDTH] = [FpVar::zero(), FpVar::zero(), FpVar::zero()];
             for (i, row) in params.mds.iter().enumerate() {
                 for (lane, m) in state.iter().zip(row.iter()) {
                     mixed[i] += lane * FpVar::constant(*m);

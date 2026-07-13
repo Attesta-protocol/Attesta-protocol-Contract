@@ -18,7 +18,7 @@
 //! belongs with M2 cost tuning.
 
 use crate::poseidon_params::{ARK, FULL_ROUNDS, MDS, PARTIAL_ROUNDS, WIDTH};
-use soroban_sdk::crypto::bls12_381::{Bls12_381, Bls12381Fr};
+use soroban_sdk::crypto::bls12_381::{Bls12381Fr, Bls12_381};
 use soroban_sdk::{BytesN, Env, U256};
 
 const TOTAL_ROUNDS: usize = FULL_ROUNDS + PARTIAL_ROUNDS;

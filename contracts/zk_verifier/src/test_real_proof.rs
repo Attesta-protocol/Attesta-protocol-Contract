@@ -129,6 +129,9 @@ fn real_transfer_proof_verifies_on_chain() {
     // The same proof for a tampered statement must fail: claim a
     // different nullifier.
     let mut tampered = inputs.clone();
-    tampered.set(1, BytesN::from_array(&env, &fr_to_bytes(Fr::from(31337u64))));
+    tampered.set(
+        1,
+        BytesN::from_array(&env, &fr_to_bytes(Fr::from(31337u64))),
+    );
     assert!(!client.verify(&soroban_proof, &tampered));
 }
