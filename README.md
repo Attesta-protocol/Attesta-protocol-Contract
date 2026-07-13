@@ -162,7 +162,7 @@ Claim types are an extensible enum: `KycLevel(n)`, `Jurisdiction(allowed_set)`, 
 | Milestone | Scope | Status |
 | --- | --- | --- |
 | **M1 — Circuits + verifier on testnet** | Transfer/withdraw circuits, Groth16 verification via BLS12-381 host functions, published trusted-setup plan | 🟢 Code complete — circuits, on-chain verification, e2e tests, and the [setup plan](./circuits/ceremony) landed; testnet deployment remains |
-| **M2 — Shielded pool MVP** | Deposit/transfer/withdraw on testnet (USDC), indexer + note relay, CLI prover | Planned |
+| **M2 — Shielded pool MVP** | Deposit/transfer/withdraw on testnet (USDC), indexer + note relay, CLI prover | 🟡 In progress — pool contract and the [CLI prover](./circuits/docs/prover.md) landed; indexer, note relay, and testnet deployment remain |
 | **M3 — WASM prover + wallet UI** | Browser proving, pay/receive surfaces, viewing keys + local history | Planned |
 | **M4 — Selective disclosure** | Scoped viewing keys, auditor portal, disclosure CLI | Planned |
 | **M5 — Attestation layer** | Credential format, issuer gateway + SDK, attestation circuits, registry contracts, first pilot issuer | Planned |
