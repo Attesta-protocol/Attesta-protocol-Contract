@@ -39,6 +39,8 @@
 pub mod merkle;
 pub mod note;
 pub mod poseidon;
+pub mod transfer;
+mod util;
 
 /// Circuit public-input layouts shared with the contract layer. Kept in
 /// sync by hand until M1 lands code generation from one definition.
