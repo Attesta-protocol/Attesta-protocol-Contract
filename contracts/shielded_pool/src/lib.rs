@@ -438,9 +438,49 @@ impl ShieldedPool {
         RotationCanceled { slot }.publish(&env);
     }
 
+    /// Execute the pending rotation of `slot` once its timelock has
+    /// elapsed. From this call on, the pool verifies proofs against the
+    /// new instance's pinned circuit and key; in-flight proofs for the
+    /// old circuit stop verifying.
+    pub fn execute_verifier_rotation(env: Env, slot: VerifierSlot) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        let pending: PendingRotation = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingRotation(slot.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, PoolError::UnknownRotation));
+        if env.ledger().timestamp() < pending.eta {
+            panic_with_error!(&env, PoolError::TimelockNotElapsed);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingRotation(slot.clone()));
+        let key = match slot {
+            VerifierSlot::Transfer => DataKey::TransferVerifier,
+            VerifierSlot::Withdraw => DataKey::WithdrawVerifier,
+        };
+        env.storage().instance().set(&key, &pending.verifier);
+        RotationExecuted {
+            slot,
+            verifier: pending.verifier,
+        }
+        .publish(&env);
+    }
+
     /// The pending rotation of `slot`, for integrators watching upgrades.
     pub fn pending_rotation(env: Env, slot: VerifierSlot) -> Option<PendingRotation> {
         env.storage().instance().get(&DataKey::PendingRotation(slot))
+    }
+
+    /// The verifier currently bound to `slot`, for provers picking the
+    /// circuit and keys to prove against.
+    pub fn verifier(env: Env, slot: VerifierSlot) -> Address {
+        let key = match slot {
+            VerifierSlot::Transfer => DataKey::TransferVerifier,
+            VerifierSlot::Withdraw => DataKey::WithdrawVerifier,
+        };
+        env.storage().instance().get(&key).unwrap()
     }
 
     // ── Public state queries for provers and indexers ──────────────────
