@@ -4,7 +4,7 @@ use super::*;
 use attesta_interfaces::{ClaimType, Groth16Proof};
 use soroban_sdk::{
     contract, contractimpl,
-    testutils::Address as _,
+    testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
     vec, Address, Bytes, BytesN, Env, Vec,
 };
@@ -371,4 +371,89 @@ fn deposit_rejects_non_canonical_commitment() {
     r[31] = 0x01;
     s.pool
         .deposit(&s.user, &s.token.address, &500, &BytesN::from_array(&s.env, &r));
+}
+
+#[test]
+fn verifier_rotation_respects_timelock() {
+    let s = setup(true, None);
+    let new_verifier = s.env.register(MockVerifier, (false,));
+
+    assert!(s.pool.pending_rotation(&VerifierSlot::Transfer).is_none());
+    s.pool
+        .queue_verifier_rotation(&VerifierSlot::Transfer, &new_verifier);
+    let pending = s.pool.pending_rotation(&VerifierSlot::Transfer).unwrap();
+    assert_eq!(pending.verifier, new_verifier);
+
+    // Before the delay elapses execution must fail...
+    assert!(s
+        .pool
+        .try_execute_verifier_rotation(&VerifierSlot::Transfer)
+        .is_err());
+    let old = s.pool.verifier(&VerifierSlot::Transfer);
+
+    // ...after it, the slot rebinds (and only that slot).
+    s.env
+        .ledger()
+        .with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.pool.execute_verifier_rotation(&VerifierSlot::Transfer);
+    assert_eq!(s.pool.verifier(&VerifierSlot::Transfer), new_verifier);
+    assert_ne!(s.pool.verifier(&VerifierSlot::Transfer), old);
+    assert_ne!(s.pool.verifier(&VerifierSlot::Withdraw), new_verifier);
+    assert!(s.pool.pending_rotation(&VerifierSlot::Transfer).is_none());
+
+    // The rotated-in verifier rejects everything: transfers now fail.
+    s.pool
+        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+    let root = s.pool.root();
+    let result = s.pool.try_transfer(
+        &dummy_proof(&s.env),
+        &vec![&s.env, BytesN::from_array(&s.env, &[9u8; 32])],
+        &vec![&s.env, commitment(&s.env, 2)],
+        &vec![&s.env, Bytes::from_slice(&s.env, b"ct")],
+        &root,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn canceled_rotation_cannot_execute() {
+    let s = setup(true, None);
+    let new_verifier = s.env.register(MockVerifier, (true,));
+    s.pool
+        .queue_verifier_rotation(&VerifierSlot::Withdraw, &new_verifier);
+    s.pool.cancel_verifier_rotation(&VerifierSlot::Withdraw);
+    s.env
+        .ledger()
+        .with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.pool.execute_verifier_rotation(&VerifierSlot::Withdraw);
+}
+
+#[test]
+fn requeue_replaces_pending_rotation_and_restarts_clock() {
+    let s = setup(true, None);
+    let first = s.env.register(MockVerifier, (true,));
+    let second = s.env.register(MockVerifier, (true,));
+
+    s.pool
+        .queue_verifier_rotation(&VerifierSlot::Transfer, &first);
+    s.env
+        .ledger()
+        .with_mut(|l| l.timestamp += ROTATION_DELAY - 1);
+    s.pool
+        .queue_verifier_rotation(&VerifierSlot::Transfer, &second);
+
+    // The old eta is gone: one second later (old eta reached) the
+    // replacement is still locked.
+    s.env.ledger().with_mut(|l| l.timestamp += 1);
+    assert!(s
+        .pool
+        .try_execute_verifier_rotation(&VerifierSlot::Transfer)
+        .is_err());
+
+    s.env
+        .ledger()
+        .with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.pool.execute_verifier_rotation(&VerifierSlot::Transfer);
+    assert_eq!(s.pool.verifier(&VerifierSlot::Transfer), second);
 }
