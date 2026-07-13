@@ -36,6 +36,7 @@
 
 #![deny(missing_docs)]
 
+pub mod note;
 pub mod poseidon;
 
 /// Circuit public-input layouts shared with the contract layer. Kept in
