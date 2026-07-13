@@ -100,6 +100,7 @@ pub fn g2_from_bytes(bytes: &[u8; G2_LEN]) -> G2Affine {
 
 /// A Groth16 proof in host encoding — the byte-for-byte contents of
 /// `attesta_interfaces::Groth16Proof`.
+#[derive(Debug)]
 pub struct ProofBytes {
     /// `proof.a`, G1.
     pub a: [u8; G1_LEN],

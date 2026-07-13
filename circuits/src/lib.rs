@@ -51,6 +51,7 @@ pub mod encoding;
 pub mod merkle;
 pub mod note;
 pub mod poseidon;
+pub mod prover;
 pub mod transfer;
 mod util;
 pub mod withdraw;
