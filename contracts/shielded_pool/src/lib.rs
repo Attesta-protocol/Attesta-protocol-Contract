@@ -169,8 +169,18 @@ impl ShieldedPool {
     /// necessarily public at the pool boundary).
     pub fn deposit(env: Env, from: Address, token: Address, amount: i128, commitment: BytesN<32>) {
         from.require_auth();
-        if amount <= 0 {
+        // Note values are 64-bit in the circuits (range-checked by bit
+        // decomposition), so an amount above u64::MAX could enter the
+        // pool but never be spent or withdrawn — reject it here.
+        if amount <= 0 || amount > u64::MAX as i128 {
             panic_with_error!(&env, PoolError::InvalidAmount);
+        }
+        // The tree is keyed on commitment bytes; only the canonical
+        // field-element encoding may enter (the host reduces mod r
+        // silently, so a non-canonical byte string would name a leaf the
+        // prover-side tree spells differently).
+        if !attesta_interfaces::fr::is_canonical(&commitment.to_array()) {
+            panic_with_error!(&env, PoolError::MalformedRequest);
         }
         let pool_token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         if token != pool_token {

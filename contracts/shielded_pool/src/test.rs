@@ -344,3 +344,26 @@ fn hex_literal(s: &str) -> [u8; 32] {
     }
     out
 }
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn deposit_rejects_amount_above_note_range() {
+    // Circuit note values are 64-bit; a larger deposit could never be
+    // spent or withdrawn, so the pool refuses to strand it.
+    let s = setup(true, None);
+    let too_big = (u64::MAX as i128) + 1;
+    s.pool
+        .deposit(&s.user, &s.token.address, &too_big, &commitment(&s.env, 1));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #8)")]
+fn deposit_rejects_non_canonical_commitment() {
+    let s = setup(true, None);
+    // The scalar field order r: reduces to 0 mod r, so it aliases the
+    // zero leaf under a different byte string.
+    let mut r = attesta_interfaces::fr::FR_MINUS_ONE;
+    r[31] = 0x01;
+    s.pool
+        .deposit(&s.user, &s.token.address, &500, &BytesN::from_array(&s.env, &r));
+}

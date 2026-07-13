@@ -47,6 +47,28 @@ impl ClaimType {
     }
 }
 
+/// Canonicity of BLS12-381 scalar encodings.
+///
+/// The host functions reduce scalar bytes mod the group order silently,
+/// so `x` and `x + r` are distinct byte strings naming the same field
+/// element. Contracts that key state on scalar bytes (nullifier sets,
+/// commitment trees) must accept only the canonical encoding; these
+/// helpers are the shared definition of "canonical".
+pub mod fr {
+    /// The BLS12-381 scalar field order minus one, big-endian — the
+    /// largest canonical scalar encoding.
+    pub const FR_MINUS_ONE: [u8; 32] = [
+        0x73, 0xed, 0xa7, 0x53, 0x29, 0x9d, 0x7d, 0x48, 0x33, 0x39, 0xd8, 0x08, 0x09, 0xa1, 0xd8,
+        0x05, 0x53, 0xbd, 0xa4, 0x02, 0xff, 0xfe, 0x5b, 0xfe, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+
+    /// Whether `bytes` is a canonical big-endian field element (< r).
+    pub fn is_canonical(bytes: &[u8; 32]) -> bool {
+        *bytes <= FR_MINUS_ONE
+    }
+}
+
 /// A Groth16 proof over BLS12-381, in the uncompressed affine encoding
 /// expected by the Protocol 25 host functions (G1: 96 bytes, G2: 192 bytes).
 #[contracttype]
