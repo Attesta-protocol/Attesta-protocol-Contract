@@ -4,7 +4,7 @@ A confidential payments layer with built-in compliance for the Stellar ecosystem
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2025-brightgreen)
-![Status](https://img.shields.io/badge/status-M1%20in%20progress-orange)
+![Status](https://img.shields.io/badge/status-M2%20in%20progress-orange)
 
 ---
 
@@ -62,12 +62,14 @@ contracts/                    Soroban workspace (Rust, soroban-sdk 27)
                               what integrators depend on
 circuits/                     Groth16 circuits (arkworks): transfer + withdraw
 ├── src/                      implemented, with per-circuit soundness docs
-├── docs/                     under docs/; attest_* circuits are M5
+├── src/bin/                  attesta-prover CLI + artifact builder
+├── docs/                     soundness docs + the prover usage guide
 ├── artifacts/                Reproducible dev keys + host-encoded VKs
 └── ceremony/                 The published trusted-setup plan
 COMPLIANCE.md                 The selective-disclosure model, for legal teams
 SECURITY.md                   Disclosure policy + protocol invariants
 CONTRIBUTING.md               Dev setup, PR checklist, issue taxonomy
+ISSUES.md                     The seeded issue backlog (scoped, with acceptance criteria)
 ```
 
 ## Architecture
@@ -92,6 +94,168 @@ CONTRIBUTING.md               Dev setup, PR checklist, issue taxonomy
 ```
 
 **The trust rule that defines this project:** proofs are generated client-side, in the browser or CLI. Private amounts, credentials, and viewing keys never leave the user's device. The backend relays ciphertext and indexes public state; a fully compromised backend can censor convenience, but can never learn an amount or forge a proof. If a proposed feature violates this rule, the feature is wrong.
+
+---
+
+## How It Works — The Full Mechanics
+
+Everything below is implemented and tested today (see the
+[e2e suite](./contracts/shielded_pool/src/test_e2e.rs), which runs the
+whole flow with real proofs and nothing mocked). All cryptography is
+deliberately standard: Groth16 over BLS12-381, Poseidon hashing, and
+the Merkle/nullifier pattern established by Zcash and Tornado-style
+pools. Novel cryptography is treated as a bug
+([circuits/CONTRIBUTING.md](./circuits/CONTRIBUTING.md)).
+
+### Keys and notes
+
+A user's shielded identity is a single secret scalar `sk` (a BLS12-381
+scalar field element), generated locally (`attesta-prover keygen`). The
+public key is derived by hashing, `pk = H(1, sk)`, where `H` is the
+protocol's Poseidon 2-to-1 hash and `1` is a domain tag. `pk` is what
+you share with people who want to pay you; `sk` never leaves your
+device.
+
+Shielded value lives in **notes**. A note is the triple
+`(value, owner_pk, blinding)`: the token amount (64-bit, in stroops),
+the owner's public key, and fresh randomness. What actually goes
+on-chain is only the note's **commitment**:
+
+```
+cm = H(H(value, owner_pk), blinding)
+```
+
+The blinding makes the commitment hiding — two notes of the same value
+to the same owner produce unrelated commitments — and Poseidon makes it
+binding: nobody can open a commitment to a different note. The owner
+keeps `(value, blinding)` locally; losing them loses the funds, because
+spending requires re-opening the commitment inside a proof.
+
+### The protocol hash and the pool tree
+
+`H` is a fixed Poseidon instance over the BLS12-381 scalar field
+(t = 3, x⁵ S-box, 8 full + 57 partial rounds, Grain LFSR constants).
+It is the single hash used everywhere: commitments, nullifiers, key
+derivation, and the Merkle tree — both **in-circuit** (as R1CS gadgets)
+and **on-chain** (via Protocol 25's Fr host functions). The on-chain
+constants (`contracts/shielded_pool/src/poseidon_params.rs`) are
+*generated* from the circuits crate by `scripts/build-artifacts.sh`,
+and a committed test vector plus the e2e suite enforce that the two
+implementations can never drift apart.
+
+Each pool maintains an **incremental Merkle tree of depth 20** (about a
+million notes per pool) whose leaves are note commitments, appended in
+order. The contract stores only the 20-node filled-subtree frontier —
+not the leaves — so inserts are cheap (~0.5M instructions including the
+20 Poseidon hashes) regardless of pool size; provers reconstruct the
+full tree locally from the public event log. Every
+historical root is remembered, so a proof generated against an older
+root stays valid as later deposits land — replay is prevented by
+nullifiers, not by root freshness.
+
+### Nullifiers — spend-once without linkability
+
+Each note has exactly one **nullifier**:
+
+```
+nf = H(H(2, sk), leaf_index)
+```
+
+Only the holder of `sk` can compute it (the `2` domain tag keeps it
+underivable from `pk`), and because the pool assigns each commitment a
+unique leaf index, each note has exactly one. Spending a note publishes
+its nullifier; the contract keeps a spent-set and rejects any repeat.
+Crucially, an observer cannot connect a published nullifier back to the
+commitment it spends — that link exists only inside the proof.
+
+### Deposits (public → shielded)
+
+`deposit(from, token, amount, commitment)` transfers `amount` of the
+pool's token from the depositor and appends their commitment to the
+tree, emitting a `Deposit` event with the assigned `leaf_index`. The
+deposit amount is public (it's a normal token transfer in); privacy
+begins once value is inside the pool. If the pool was constructed with
+an attestation gate, the depositor must hold a valid compliance
+attestation in the `attestation_registry` — this is what makes it a
+compliant-by-construction pool rather than a mixer.
+
+### Shielded transfers (2-in / 2-out)
+
+A transfer spends up to two notes and creates exactly two new ones
+(pad with zero-value dummies when you need fewer — the fixed shape is
+itself privacy: every transfer looks identical). The sender proves,
+in zero knowledge, all of the following at once:
+
+1. **Membership** — each real spent note's commitment sits in the tree
+   under the public root (Merkle path check, in-circuit).
+2. **Ownership** — the prover knows the `sk` behind each spent note's
+   `owner_pk`.
+3. **Nullifier correctness** — the published nullifiers are exactly
+   `H(H(2, sk), leaf_index)` for the spent notes.
+4. **Conservation** — input values sum to output values, with every
+   value range-checked to 64 bits so sums can't wrap the field.
+5. **Output correctness** — the published new commitments open to the
+   claimed output notes.
+
+The public inputs are just `[root, nullifier₀, nullifier₁,
+new_commitment₀, new_commitment₁]` — no values, no keys, no addresses.
+On-chain, `transfer(proof, nullifiers, new_commitments,
+encrypted_notes, root)` checks the root is known, the nullifiers are
+unspent (and mutually distinct), verifies the Groth16 proof against the
+transfer verifier, marks the nullifiers spent, appends the new
+commitments, and emits a `ShieldedTransfer` event carrying the
+recipient-encrypted note ciphertexts. The full soundness argument is in
+[`circuits/docs/transfer.md`](./circuits/docs/transfer.md).
+
+### Withdrawals (shielded → public)
+
+`withdraw(proof, nullifier, to, amount, root)` exits one note's exact
+value back to a public token balance. The withdraw circuit additionally
+binds the proof to the payout address: the contract computes
+`recipient_binding = SHA-256(address XDR, top byte zeroed)` from `to`
+itself and uses it as a public input — so a relayer who submits the
+transaction on your behalf cannot redirect the funds; a proof for one
+recipient simply doesn't verify for another. Soundness argument:
+[`circuits/docs/withdraw.md`](./circuits/docs/withdraw.md).
+
+### On-chain verification
+
+Each circuit has its own `zk_verifier` instance, constructed with a
+published verifying key and immutable thereafter. Verification is
+Groth16 over BLS12-381 using Protocol 25 host functions — one pairing
+check dominates the cost (~53M instructions for a transfer, ~51M for a
+withdraw, comfortably inside the 100M transaction limit; see the
+[measured cost table](./contracts/README.md#measured-costs), which the
+test suite enforces as a regression gate). Circuit upgrades never
+mutate a key: a new verifier instance is deployed and the pool's
+verifier slot is rotated behind an on-chain timelock, announced by
+events for the full delay before taking effect.
+
+### Proving — entirely client-side
+
+The [`attesta-prover` CLI](./circuits/docs/prover.md) (and the M3 WASM
+prover, built on the same `circuits/src/prover.rs` core) turns local
+secrets plus the public commitment log into submission-ready proof
+bundles. The prover rebuilds the pool tree from the `Deposit` /
+`ShieldedTransfer` events, checks your note against it *before*
+proving (so mistakes fail with a diagnosis, not an unsatisfiable
+circuit), and emits a bundle containing only public data — safe to hand
+to any relayer. Measured on the dev artifacts: ~10s to prove a
+transfer, ~5s for a withdraw, and a proof is just three curve points
+(384 bytes host-encoded). Full walkthrough:
+[circuits/docs/prover.md](./circuits/docs/prover.md).
+
+### The trusted setup — dev keys now, ceremony before value
+
+Groth16 needs a circuit-specific setup whose randomness ("toxic
+waste") must be destroyed — whoever holds it can forge proofs, i.e.
+mint shielded value. The committed keys are **development keys** from a
+fixed public seed: byte-reproducible by anyone, secure for no one, and
+banned from ever gating real value. Production keys come from a public
+multi-party ceremony (any single honest participant destroys the
+waste), finalized by a public randomness beacon, with a verifiable
+transcript published in this repo. The full plan and its ground rules:
+[circuits/ceremony/](./circuits/ceremony).
 
 ---
 
@@ -121,7 +285,7 @@ runs; the attestation circuits are M5.
 | `withdraw(proof, nullifier, to, amount, root)` | Shielded → public: exits the pool with a validity proof bound to the recipient, so a relayer cannot redirect funds |
 | `root()` / `is_known_root(root)` / `is_spent(nullifier)` / `size()` | Public state queries for provers and indexers |
 
-**Design:** Pedersen commitments over note values; incremental Merkle tree of commitments; nullifier set prevents double-spends; per-token pools (USDC pool, EURC pool) so value can never cross assets invisibly. Total pool balance is always publicly auditable — the contract's token balance must equal the sum of shielded notes, so insolvency or inflation bugs are externally detectable even though individual amounts are hidden.
+**Design:** hiding Poseidon note commitments (`H(H(value, pk), blinding)`); incremental depth-20 Merkle tree of commitments; nullifier set prevents double-spends; per-token pools (USDC pool, EURC pool) so value can never cross assets invisibly. Total pool balance is always publicly auditable — the contract's token balance must equal the sum of shielded notes, so insolvency or inflation bugs are externally detectable even though individual amounts are hidden.
 
 ### 2. `zk_verifier` — proof verification
 
@@ -175,6 +339,7 @@ Three decoupled layers — plus a fourth contribution surface (circuits) for cry
 
 ### Where to start
 
+- 📋 **[ISSUES.md](./ISSUES.md)** — ten scoped issues with tasks and acceptance criteria, spanning all four layers, ready to pick up
 - 🟢 **Good first issues** — `contract/good-first-issue`, `backend/good-first-issue`, `frontend/good-first-issue`
 - 🟡 **Help wanted** — WASM prover performance, note-scanning efficiency, issuer SDK examples, i18n
 - 🔴 **Core** — circuit design and review, nullifier/commitment scheme invariants, trusted-setup ceremony tooling
