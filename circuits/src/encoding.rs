@@ -72,6 +72,32 @@ pub fn g2_to_bytes(p: &G2Affine) -> [u8; G2_LEN] {
     out
 }
 
+fn fq_from_be(bytes: &[u8]) -> Fq {
+    Fq::from_be_bytes_mod_order(bytes)
+}
+
+/// Decodes a 96-byte host-encoded G1 point. Inverse of [`g1_to_bytes`]
+/// for the encodings this crate produces; assumes canonical coordinates
+/// and does not re-check curve membership (the host does, on use).
+pub fn g1_from_bytes(bytes: &[u8; G1_LEN]) -> G1Affine {
+    if bytes[0] & INFINITY_FLAG != 0 {
+        return G1Affine::identity();
+    }
+    G1Affine::new_unchecked(fq_from_be(&bytes[..48]), fq_from_be(&bytes[48..]))
+}
+
+/// Decodes a 192-byte host-encoded G2 point (see [`g1_from_bytes`]).
+pub fn g2_from_bytes(bytes: &[u8; G2_LEN]) -> G2Affine {
+    use ark_bls12_381::Fq2;
+    if bytes[0] & INFINITY_FLAG != 0 {
+        return G2Affine::identity();
+    }
+    G2Affine::new_unchecked(
+        Fq2::new(fq_from_be(&bytes[48..96]), fq_from_be(&bytes[..48])),
+        Fq2::new(fq_from_be(&bytes[144..]), fq_from_be(&bytes[96..144])),
+    )
+}
+
 /// A Groth16 proof in host encoding — the byte-for-byte contents of
 /// `attesta_interfaces::Groth16Proof`.
 pub struct ProofBytes {
@@ -149,6 +175,30 @@ mod tests {
         let g2 = g2_to_bytes(&G2Affine::identity());
         assert_eq!(g2[0], 0x40);
         assert!(g2[1..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn random_points_roundtrip() {
+        use ark_ec::PrimeGroup;
+        use ark_ff::UniformRand;
+        use rand_chacha::rand_core::SeedableRng;
+        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(7);
+        for _ in 0..32 {
+            let s = Fr::rand(&mut rng);
+            let g1: G1Affine = (ark_bls12_381::G1Projective::generator() * s).into();
+            let g2: G2Affine = (ark_bls12_381::G2Projective::generator() * s).into();
+            assert_eq!(g1_from_bytes(&g1_to_bytes(&g1)), g1);
+            assert_eq!(g2_from_bytes(&g2_to_bytes(&g2)), g2);
+            assert_eq!(fr_from_bytes(&fr_to_bytes(s)), s);
+        }
+        assert_eq!(
+            g1_from_bytes(&g1_to_bytes(&G1Affine::identity())),
+            G1Affine::identity()
+        );
+        assert_eq!(
+            g2_from_bytes(&g2_to_bytes(&G2Affine::identity())),
+            G2Affine::identity()
+        );
     }
 
     #[test]
