@@ -525,15 +525,14 @@ fn insert_commitment(env: &Env, commitment: &BytesN<32>) -> (u32, BytesN<32>) {
     let zeros: Vec<BytesN<32>> = storage.get(&DataKey::Zeros).unwrap();
     let mut filled: Vec<BytesN<32>> = storage.get(&DataKey::FilledSubtrees).unwrap();
 
-    let hasher = poseidon::Hasher::new(env);
     let mut node = commitment.clone();
     let mut idx = index;
     for level in 0..TREE_DEPTH {
         if idx & 1 == 0 {
             filled.set(level, node.clone());
-            node = hasher.hash2(&node, &zeros.get_unchecked(level));
+            node = poseidon::hash2(env, &node, &zeros.get_unchecked(level));
         } else {
-            node = hasher.hash2(&filled.get_unchecked(level), &node);
+            node = poseidon::hash2(env, &filled.get_unchecked(level), &node);
         }
         idx >>= 1;
     }

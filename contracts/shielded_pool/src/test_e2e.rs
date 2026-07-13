@@ -69,6 +69,29 @@ fn bytes32(env: &Env, x: Fr) -> BytesN<32> {
 /// withdraw proof can be generated over it.
 const ROTATION_DELAY: u64 = 86_400;
 
+/// Capture the last invocation's metered resources and enforce the
+/// network transaction limits — the protocol's standing cost-regression
+/// guard. Run with `--nocapture` to see the numbers.
+fn record_cost(env: &Env, op: &str) -> (i64, i64) {
+    let r = env.cost_estimate().resources();
+    std::println!(
+        "cost[{op}]: {} instructions, {} mem bytes",
+        r.instructions,
+        r.mem_bytes
+    );
+    assert!(
+        r.instructions < 100_000_000,
+        "{op}: {} instructions exceeds the 100M tx limit",
+        r.instructions
+    );
+    assert!(
+        r.mem_bytes < 40 * 1024 * 1024,
+        "{op}: {} mem bytes exceeds the 40MB tx limit",
+        r.mem_bytes
+    );
+    (r.instructions, r.mem_bytes)
+}
+
 fn recipient_binding(env: &Env, address: &Address) -> Fr {
     use soroban_sdk::xdr::ToXdr;
     let digest = env.crypto().sha256(&address.clone().to_xdr(env));
@@ -141,6 +164,7 @@ fn full_flow_deposit_transfer_withdraw_with_real_proofs() {
 
     let mut tree = MerkleTree::new(POOL_TREE_DEPTH);
     pool.deposit(&user, &token.address, &600, &bytes32(&env, n1.commitment()));
+    record_cost(&env, "deposit");
     let i1 = tree.insert(n1.commitment());
     pool.deposit(&user, &token.address, &400, &bytes32(&env, n2.commitment()));
     let i2 = tree.insert(n2.commitment());
@@ -202,6 +226,7 @@ fn full_flow_deposit_transfer_withdraw_with_real_proofs() {
         ],
         &bytes32(&env, root),
     );
+    record_cost(&env, "transfer 2-in/2-out");
 
     let i_out1 = tree.insert(out1.commitment());
     tree.insert(out2.commitment());
@@ -234,6 +259,7 @@ fn full_flow_deposit_transfer_withdraw_with_real_proofs() {
         &750,
         &bytes32(&env, root),
     );
+    record_cost(&env, "withdraw");
 
     assert_eq!(token.balance(&payout), 750);
     assert_eq!(token.balance(&pool.address), 250);

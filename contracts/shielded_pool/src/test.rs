@@ -51,9 +51,6 @@ const ROTATION_DELAY: u64 = 86_400;
 fn setup(verifier_accepts: bool, gate: Option<GateConfig>) -> Setup {
     let env = Env::default();
     env.mock_all_auths();
-    // The Poseidon Merkle updates run ~20 host-Fr hash evaluations per
-    // insert, which overruns the default unit-test budget.
-    env.cost_estimate().budget().reset_unlimited();
 
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -255,7 +252,6 @@ fn withdraw_rejects_spent_nullifier() {
 fn gated_pool_admits_attested_depositor() {
     let env = Env::default();
     env.mock_all_auths();
-    env.cost_estimate().budget().reset_unlimited();
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let asset = env.register_stellar_asset_contract_v2(admin.clone());
@@ -290,7 +286,6 @@ fn gated_pool_admits_attested_depositor() {
 fn gated_pool_rejects_unattested_depositor() {
     let env = Env::default();
     env.mock_all_auths();
-    env.cost_estimate().budget().reset_unlimited();
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let asset = env.register_stellar_asset_contract_v2(admin.clone());
@@ -325,7 +320,6 @@ fn poseidon_matches_circuit_vector() {
     // hash2(1, 2) must agree between the circuits crate and this
     // contract's host-Fr implementation.
     let env = Env::default();
-    env.cost_estimate().budget().reset_unlimited();
     let mut one = [0u8; 32];
     one[31] = 1;
     let mut two = [0u8; 32];
