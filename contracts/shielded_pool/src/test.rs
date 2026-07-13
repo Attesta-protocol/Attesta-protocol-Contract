@@ -49,6 +49,9 @@ struct Setup {
 fn setup(verifier_accepts: bool, gate: Option<GateConfig>) -> Setup {
     let env = Env::default();
     env.mock_all_auths();
+    // The Poseidon Merkle updates run ~20 host-Fr hash evaluations per
+    // insert, which overruns the default unit-test budget.
+    env.cost_estimate().budget().reset_unlimited();
 
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -249,6 +252,7 @@ fn withdraw_rejects_spent_nullifier() {
 fn gated_pool_admits_attested_depositor() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let asset = env.register_stellar_asset_contract_v2(admin.clone());
@@ -282,6 +286,7 @@ fn gated_pool_admits_attested_depositor() {
 fn gated_pool_rejects_unattested_depositor() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let asset = env.register_stellar_asset_contract_v2(admin.clone());
@@ -307,4 +312,36 @@ fn gated_pool_rejects_unattested_depositor() {
     );
 
     pool.deposit(&user, &asset.address(), &100, &commitment(&env, 1));
+}
+
+#[test]
+fn poseidon_matches_circuit_vector() {
+    // Cross-check vector printed by circuits/scripts/build-artifacts.sh:
+    // hash2(1, 2) must agree between the circuits crate and this
+    // contract's host-Fr implementation.
+    let env = Env::default();
+    env.cost_estimate().budget().reset_unlimited();
+    let mut one = [0u8; 32];
+    one[31] = 1;
+    let mut two = [0u8; 32];
+    two[31] = 2;
+    let h = crate::poseidon::hash2(
+        &env,
+        &BytesN::from_array(&env, &one),
+        &BytesN::from_array(&env, &two),
+    );
+    let expected =
+        hex_literal("28ce19420fc246a05553ad1e8c98f5c9d67166be2c18e9e4cb4b4e317dd2a78a");
+    assert_eq!(h, BytesN::from_array(&env, &expected));
+}
+
+fn hex_literal(s: &str) -> [u8; 32] {
+    let bytes = s.as_bytes();
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let hi = (bytes[2 * i] as char).to_digit(16).unwrap() as u8;
+        let lo = (bytes[2 * i + 1] as char).to_digit(16).unwrap() as u8;
+        out[i] = hi * 16 + lo;
+    }
+    out
 }

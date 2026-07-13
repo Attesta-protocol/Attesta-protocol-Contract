@@ -216,6 +216,29 @@ fn emit_poseidon_params(root: &Path) {
         writeln!(out, "    ],").unwrap();
     }
     writeln!(out, "];").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "/// Empty-subtree hashes: `ZEROS[0] = 0`, `ZEROS[i+1] = H(z_i, z_i)`,"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// up to the pool tree depth — saves the constructor {POOL_TREE_DEPTH} hashes."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "pub const ZEROS: [[u8; 32]; {}] = [",
+        POOL_TREE_DEPTH + 1
+    )
+    .unwrap();
+    let mut z = Fr::from(0u64);
+    for _ in 0..=POOL_TREE_DEPTH {
+        writeln!(out, "    {},", byte_array(&fr_to_bytes(z))).unwrap();
+        z = poseidon::hash2(z, z);
+    }
+    writeln!(out, "];").unwrap();
 
     fs::write(&out_path, out).unwrap();
 

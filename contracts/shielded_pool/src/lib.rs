@@ -21,11 +21,13 @@
 //! attestation from the `attestation_registry`, making this a gated
 //! privacy pool rather than a mixer.
 //!
-//! ## Merkle hash — M1 placeholder
-//! The tree currently hashes with SHA-256. The production hash must match
-//! the transfer/withdraw circuits (a circuit-friendly hash such as Poseidon
-//! over the BLS12-381 scalar field) and will be pinned when M1 lands.
-//! Nothing outside [`hash_pair`] depends on the choice.
+//! ## Merkle hash — pinned (M1)
+//! The tree hashes with the protocol Poseidon instance over the
+//! BLS12-381 scalar field (see [`poseidon`]), computed via the Protocol
+//! 25 Fr host functions. It is constant-for-constant identical to the
+//! hash the transfer/withdraw circuits evaluate in-circuit; the
+//! constants are generated from `circuits/` by
+//! `circuits/scripts/build-artifacts.sh`.
 //!
 //! ## Storage
 //! - Instance: pool config, `NextIndex`, `FilledSubtrees`, `Zeros`,
@@ -40,6 +42,9 @@ use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, token,
     vec, Address, Bytes, BytesN, Env, Vec,
 };
+
+mod poseidon;
+mod poseidon_params;
 
 /// Merkle tree depth: capacity 2^20 ≈ 1M notes per pool instance.
 pub const TREE_DEPTH: u32 = 20;
@@ -140,11 +145,11 @@ impl ShieldedPool {
             storage.set(&DataKey::Gate, &g);
         }
 
-        // Precompute the all-empty subtree hashes for each level.
-        let mut zeros: Vec<BytesN<32>> = vec![&env, BytesN::from_array(&env, &[0u8; 32])];
-        for level in 0..TREE_DEPTH {
-            let z = zeros.get_unchecked(level);
-            zeros.push_back(hash_pair(&env, &z, &z));
+        // The all-empty subtree hashes per level, precomputed alongside
+        // the Poseidon constants (ZEROS[i+1] = H(z_i, z_i)).
+        let mut zeros: Vec<BytesN<32>> = vec![&env];
+        for z in poseidon_params::ZEROS.iter() {
+            zeros.push_back(BytesN::from_array(&env, z));
         }
         let empty_root = zeros.get_unchecked(TREE_DEPTH);
         storage.set(&DataKey::Zeros, &zeros);
@@ -350,17 +355,10 @@ impl ShieldedPool {
     }
 }
 
-/// Merkle node hash. M1 placeholder — see module docs: will be replaced by
-/// the circuit-pinned hash (Poseidon/BLS12-381 scalar field) before M2.
-fn hash_pair(env: &Env, left: &BytesN<32>, right: &BytesN<32>) -> BytesN<32> {
-    let mut data = Bytes::new(env);
-    data.append(&Bytes::from_slice(env, &left.to_array()));
-    data.append(&Bytes::from_slice(env, &right.to_array()));
-    env.crypto().sha256(&data).to_bytes()
-}
-
 /// Incremental (append-only) Merkle insertion, tracking one filled subtree
-/// per level. Returns the leaf index and the new root.
+/// per level. Returns the leaf index and the new root. The node hash is
+/// the circuit-pinned Poseidon instance (see the [`poseidon`] module docs
+/// for the lockstep rule with `circuits/`).
 fn insert_commitment(env: &Env, commitment: &BytesN<32>) -> (u32, BytesN<32>) {
     let storage = env.storage().instance();
     let index: u32 = storage.get(&DataKey::NextIndex).unwrap();
@@ -370,14 +368,15 @@ fn insert_commitment(env: &Env, commitment: &BytesN<32>) -> (u32, BytesN<32>) {
     let zeros: Vec<BytesN<32>> = storage.get(&DataKey::Zeros).unwrap();
     let mut filled: Vec<BytesN<32>> = storage.get(&DataKey::FilledSubtrees).unwrap();
 
+    let hasher = poseidon::Hasher::new(env);
     let mut node = commitment.clone();
     let mut idx = index;
     for level in 0..TREE_DEPTH {
         if idx & 1 == 0 {
             filled.set(level, node.clone());
-            node = hash_pair(env, &node, &zeros.get_unchecked(level));
+            node = hasher.hash2(&node, &zeros.get_unchecked(level));
         } else {
-            node = hash_pair(env, &filled.get_unchecked(level), &node);
+            node = hasher.hash2(&filled.get_unchecked(level), &node);
         }
         idx >>= 1;
     }
