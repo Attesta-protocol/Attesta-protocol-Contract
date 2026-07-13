@@ -64,10 +64,7 @@ pub fn parse_vk_hex(text: &str) -> Result<VerificationKeyBytes, String> {
         delta: g2(delta, "delta")?,
         ic: ic
             .into_iter()
-            .map(|(i, v)| {
-                v.try_into()
-                    .map_err(|_| format!("ic.{i}: wrong length"))
-            })
+            .map(|(i, v)| v.try_into().map_err(|_| format!("ic.{i}: wrong length")))
             .collect::<Result<_, _>>()?,
     })
 }
