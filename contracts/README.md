@@ -40,6 +40,27 @@ runs deposit → shielded transfer → withdraw against real `ZkVerifier`
 instances with real Groth16 proofs and asserts the on-chain root equals
 the prover-side tree root after every insertion.
 
+## Measured costs
+
+From the e2e benchmark (`shielded_pool/src/test_e2e.rs`, real proofs,
+real verifiers; run with `--nocapture` for current numbers). The
+benchmark asserts every operation stays inside the network transaction
+limits (100M instructions / 40MB memory), so a cost regression fails
+the suite:
+
+| Operation | Instructions | Memory |
+| --- | --- | --- |
+| `deposit` (20-level Poseidon insert) | ~0.5M | ~78KB |
+| `transfer` (2-in/2-out: pairing check + 2 inserts) | ~53M | ~510KB |
+| `withdraw` (pairing check + payout) | ~51M | ~490KB |
+
+Transfers and withdrawals are dominated by the Groth16 pairing check,
+which is where the cost should live. Numbers are host-metered from
+native tests; the in-wasm Poseidon arithmetic adds a few million wasm
+instructions on-network on top of the figures above (still far inside
+the limit). Re-benchmark on every protocol upgrade per the
+[maintenance commitment](../README.md#maintenance-commitment).
+
 ## Commands
 
 ```bash
