@@ -135,3 +135,70 @@ fn real_transfer_proof_verifies_on_chain() {
     );
     assert!(!client.verify(&soroban_proof, &tampered));
 }
+
+#[test]
+fn real_withdraw_proof_verifies_on_chain() {
+    use attesta_circuits::withdraw::WithdrawCircuit;
+
+    let mut rng = ChaCha20Rng::seed_from_u64(0x0e2f);
+    let (pk, vk) = Groth16::<Bls12_381>::circuit_specific_setup(
+        WithdrawCircuit::blank(POOL_TREE_DEPTH),
+        &mut rng,
+    )
+    .unwrap();
+
+    let sk = Fr::from(11u64);
+    let note = Note {
+        value: 900,
+        owner_pk: derive_pk(sk),
+        blinding: Fr::from(101u64),
+    };
+    let mut tree = MerkleTree::new(POOL_TREE_DEPTH);
+    let idx = tree.insert(note.commitment());
+    let binding = Fr::from(4242u64);
+
+    let public_inputs = [
+        tree.root(),
+        derive_nullifier(sk, idx),
+        binding,
+        Fr::from(note.value),
+    ];
+    let circuit = WithdrawCircuit {
+        depth: POOL_TREE_DEPTH,
+        root: Some(public_inputs[0]),
+        nullifier: Some(public_inputs[1]),
+        recipient_binding: Some(binding),
+        amount: Some(public_inputs[3]),
+        sk: Some(sk),
+        blinding: Some(note.blinding),
+        path: Some(tree.path(idx)),
+    };
+    let proof = Groth16::<Bls12_381>::prove(&pk, circuit, &mut rng).unwrap();
+
+    let env = Env::default();
+    env.cost_estimate().budget().reset_unlimited();
+    let id = env.register(
+        ZkVerifier,
+        (symbol_short!("withdraw"), to_soroban_vk(&env, &vk)),
+    );
+    let client = ZkVerifierClient::new(&env, &id);
+
+    let mut inputs: Vec<BytesN<32>> = vec![&env];
+    for x in &public_inputs {
+        inputs.push_back(BytesN::from_array(&env, &fr_to_bytes(*x)));
+    }
+    let soroban_proof = to_soroban_proof(&env, &proof);
+    assert!(client.verify(&soroban_proof, &inputs));
+
+    // The recipient binding is part of the statement: redirecting the
+    // exit must invalidate the proof on-chain, exactly as it does
+    // natively — this is what stops a relayer stealing a withdrawal.
+    let mut redirected = inputs.clone();
+    redirected.set(2, BytesN::from_array(&env, &fr_to_bytes(Fr::from(6666u64))));
+    assert!(!client.verify(&soroban_proof, &redirected));
+
+    // And a different claimed amount is a different statement.
+    let mut inflated = inputs.clone();
+    inflated.set(3, BytesN::from_array(&env, &fr_to_bytes(Fr::from(901u64))));
+    assert!(!client.verify(&soroban_proof, &inflated));
+}
