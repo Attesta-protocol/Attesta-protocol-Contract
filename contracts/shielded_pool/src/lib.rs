@@ -470,7 +470,9 @@ impl ShieldedPool {
 
     /// The pending rotation of `slot`, for integrators watching upgrades.
     pub fn pending_rotation(env: Env, slot: VerifierSlot) -> Option<PendingRotation> {
-        env.storage().instance().get(&DataKey::PendingRotation(slot))
+        env.storage()
+            .instance()
+            .get(&DataKey::PendingRotation(slot))
     }
 
     /// The verifier currently bound to `slot`, for provers picking the

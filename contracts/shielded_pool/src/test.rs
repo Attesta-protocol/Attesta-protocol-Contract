@@ -363,8 +363,12 @@ fn deposit_rejects_non_canonical_commitment() {
     // zero leaf under a different byte string.
     let mut r = attesta_interfaces::fr::FR_MINUS_ONE;
     r[31] = 0x01;
-    s.pool
-        .deposit(&s.user, &s.token.address, &500, &BytesN::from_array(&s.env, &r));
+    s.pool.deposit(
+        &s.user,
+        &s.token.address,
+        &500,
+        &BytesN::from_array(&s.env, &r),
+    );
 }
 
 #[test]
@@ -386,9 +390,7 @@ fn verifier_rotation_respects_timelock() {
     let old = s.pool.verifier(&VerifierSlot::Transfer);
 
     // ...after it, the slot rebinds (and only that slot).
-    s.env
-        .ledger()
-        .with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.env.ledger().with_mut(|l| l.timestamp += ROTATION_DELAY);
     s.pool.execute_verifier_rotation(&VerifierSlot::Transfer);
     assert_eq!(s.pool.verifier(&VerifierSlot::Transfer), new_verifier);
     assert_ne!(s.pool.verifier(&VerifierSlot::Transfer), old);
@@ -417,9 +419,7 @@ fn canceled_rotation_cannot_execute() {
     s.pool
         .queue_verifier_rotation(&VerifierSlot::Withdraw, &new_verifier);
     s.pool.cancel_verifier_rotation(&VerifierSlot::Withdraw);
-    s.env
-        .ledger()
-        .with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.env.ledger().with_mut(|l| l.timestamp += ROTATION_DELAY);
     s.pool.execute_verifier_rotation(&VerifierSlot::Withdraw);
 }
 
@@ -445,9 +445,7 @@ fn requeue_replaces_pending_rotation_and_restarts_clock() {
         .try_execute_verifier_rotation(&VerifierSlot::Transfer)
         .is_err());
 
-    s.env
-        .ledger()
-        .with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.env.ledger().with_mut(|l| l.timestamp += ROTATION_DELAY);
     s.pool.execute_verifier_rotation(&VerifierSlot::Transfer);
     assert_eq!(s.pool.verifier(&VerifierSlot::Transfer), second);
 }
