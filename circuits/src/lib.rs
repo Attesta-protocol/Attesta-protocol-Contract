@@ -1,28 +1,38 @@
 //! # attesta-circuits
 //!
-//! Groth16 circuits over BLS12-381 for the Attesta protocol (M1, in
-//! progress). Every circuit here has a matching on-chain `zk_verifier`
-//! instance pinned to its verifying key.
+//! Groth16 circuits over BLS12-381 for the Attesta protocol. Every
+//! circuit here has a matching on-chain `zk_verifier` instance pinned to
+//! its verifying key.
 //!
-//! ## Planned circuits
+//! ## Circuits
 //!
-//! - **`transfer`** — proves, for a shielded transfer: the spent notes are
-//!   members of the commitment tree under the public root; the prover
-//!   holds their spending keys; the published nullifiers are correctly
-//!   derived; and total input value equals total output value (no
-//!   inflation), with all values range-checked.
+//! - **[`transfer`]** (implemented; soundness argument in
+//!   `docs/transfer.md`) — proves, for a shielded transfer: the spent
+//!   notes are members of the commitment tree under the public root; the
+//!   prover holds their spending keys; the published nullifiers are
+//!   correctly derived; and total input value equals total output value
+//!   (no inflation), with all values range-checked.
 //!   Public inputs: `[root, nullifiers.., new_commitments..]`.
 //!
-//! - **`withdraw`** — proves ownership of an unspent note of exactly the
-//!   public amount, bound to the public recipient so a relayer cannot
+//! - **[`withdraw`]** (implemented; soundness argument in
+//!   `docs/withdraw.md`) — proves ownership of an unspent note of exactly
+//!   the public amount, bound to the public recipient so a relayer cannot
 //!   redirect the exit.
 //!   Public inputs: `[root, nullifier, recipient_binding, amount]`.
 //!
-//! - **`attest_*`** (M5) — one circuit per claim kind, proving possession
-//!   of a valid, unexpired credential signed by an issuer key that is a
-//!   public input (registry membership is checked on-chain).
+//! - **`attest_*`** (M5, planned) — one circuit per claim kind, proving
+//!   possession of a valid, unexpired credential signed by an issuer key
+//!   that is a public input (registry membership is checked on-chain).
 //!   Public inputs: `[issuer_key, credential_ref, claim_binding,
 //!   subject_binding, expires_at]`.
+//!
+//! ## Shared primitives
+//!
+//! [`poseidon`] is the protocol hash (its constants are exported to the
+//! contract layer by `scripts/build-artifacts.sh`); [`note`] defines
+//! commitments and nullifiers; [`merkle`] is the prover-side tree plus
+//! the membership gadget; [`encoding`] bridges arkworks objects to the
+//! Soroban host encodings.
 //!
 //! ## Ground rules (see ../CONTRIBUTING.md)
 //!
