@@ -35,10 +35,9 @@ fn fr(bytes: &[u8; 32]) -> Fr {
 /// identical to `attesta_circuits::poseidon::permute`.
 fn permute(mut state: [Fr; WIDTH]) -> [Fr; WIDTH] {
     let half_full = FULL_ROUNDS / 2;
-    let total = FULL_ROUNDS + PARTIAL_ROUNDS;
-    for round in 0..total {
+    for (round, ark_row) in ARK.iter().enumerate() {
         // Add round constants.
-        for (lane, c) in state.iter_mut().zip(ARK[round].iter()) {
+        for (lane, c) in state.iter_mut().zip(ark_row.iter()) {
             *lane += fr(c);
         }
         // S-box x^5: every lane in full rounds, lane 0 in partial rounds.
