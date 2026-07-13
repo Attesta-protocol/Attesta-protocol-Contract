@@ -330,6 +330,7 @@ dependencies = [
  "ark-snark",
  "attesta-circuits",
  "attesta-interfaces",
+ "attesta-zk-verifier",
  "rand_chacha",
  "soroban-sdk",
 ]

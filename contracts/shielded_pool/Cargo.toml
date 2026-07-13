@@ -24,3 +24,4 @@ ark-bls12-381 = "0.5"
 ark-groth16 = "0.5"
 ark-snark = "0.5"
 rand_chacha = "0.3"
+attesta-zk-verifier = { path = "../zk_verifier" }

@@ -426,3 +426,5 @@ fn amount_to_field(env: &Env, amount: i128) -> BytesN<32> {
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_e2e;
