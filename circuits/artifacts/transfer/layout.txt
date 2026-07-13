@@ -1,0 +1,5 @@
+circuit=transfer
+tree_depth=20
+public_inputs=5
+order=[root, nullifier_0..1, new_commitment_0..1]
+keys=DEV (public seed)

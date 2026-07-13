@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
-# Build circuit artifacts: compiled constraint systems, proving keys, and
-# the verifying keys pinned by on-chain zk_verifier instances.
+# Build circuit artifacts: proving keys, the verifying keys pinned by
+# on-chain zk_verifier instances, layout manifests, checksums, and the
+# generated Poseidon constants for the contract layer.
 #
-# M1 (in progress): this will
-#   1. compile each circuit (transfer, withdraw) with the arkworks toolchain
-#   2. apply the published trusted-setup ceremony transcript
-#   3. emit reproducible artifacts under circuits/artifacts/<circuit>/
-#      (proving key, verifying key, layout manifest, checksums)
-#
-# Artifacts are reproducible: anyone can rerun this script against the
-# committed sources + ceremony transcript and get byte-identical keys.
+# Artifacts are reproducible: this runs the setup from a fixed public
+# seed (DEVELOPMENT KEYS — see artifacts/README.md), so anyone rerunning
+# it against the committed sources gets byte-identical output. The
+# production setup replaces the seeded RNG with the multi-party ceremony
+# transcript (circuits/ceremony/); everything downstream is identical.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "attesta-circuits: artifact build"
-echo
-echo "  No circuits are implemented yet (M1 in progress)."
-echo "  This script is the single entry point that will generate proving"
-echo "  and verifying keys once the transfer/withdraw circuits land."
-echo
-echo "  Nothing was generated."
+cargo run --release --bin build-artifacts

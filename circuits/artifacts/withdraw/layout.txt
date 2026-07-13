@@ -1,0 +1,5 @@
+circuit=withdraw
+tree_depth=20
+public_inputs=4
+order=[root, nullifier, recipient_binding, amount]
+keys=DEV (public seed)

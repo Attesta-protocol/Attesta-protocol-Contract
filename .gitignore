@@ -3,6 +3,9 @@ Cargo.lock
 !contracts/Cargo.lock
 !circuits/Cargo.lock
 *.wasm
+# Proving keys are large reproducible artifacts; regenerate with
+# circuits/scripts/build-artifacts.sh
+circuits/artifacts/*/proving_key.bin
 .env
 .stellar/
 .soroban/
