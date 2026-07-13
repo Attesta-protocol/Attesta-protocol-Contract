@@ -48,6 +48,13 @@ pub enum VerifierError {
     InputLengthMismatch = 1,
     /// The verifying key is malformed (empty IC).
     MalformedKey = 2,
+    /// A public input is not a canonical field element (≥ the group
+    /// order). The host reduces scalars mod r silently, so `x` and
+    /// `x + r` are distinct byte strings naming the same field element —
+    /// accepting both would let callers replay one proof under two
+    /// encodings (e.g. spending one nullifier twice). Canonical bytes
+    /// are required so each statement has exactly one encoding.
+    NonCanonicalInput = 3,
 }
 
 #[contract]
@@ -87,12 +94,20 @@ impl Verifier for ZkVerifier {
     /// multi-pairing.
     ///
     /// Public inputs are big-endian 32-byte scalars and must be canonical
-    /// field elements (< the group order) — honest provers produce these by
-    /// construction.
+    /// field elements (< the group order); non-canonical encodings panic
+    /// with [`VerifierError::NonCanonicalInput`] rather than being
+    /// silently reduced — see that variant for why accepting them would
+    /// be unsound for consumers keyed on input bytes (nullifier sets).
     fn verify(env: Env, proof: Groth16Proof, public_inputs: Vec<BytesN<32>>) -> bool {
         let vk: VerificationKey = env.storage().instance().get(&DataKey::Vk).unwrap();
         if public_inputs.len() + 1 != vk.ic.len() {
             panic_with_error!(&env, VerifierError::InputLengthMismatch);
+        }
+        for input in public_inputs.iter() {
+            // Canonical ⇔ input ≤ r − 1, compared big-endian.
+            if input.to_array() > FR_MINUS_ONE {
+                panic_with_error!(&env, VerifierError::NonCanonicalInput);
+            }
         }
 
         let bls = env.crypto().bls12_381();

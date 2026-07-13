@@ -90,3 +90,33 @@ fn input_length_mismatch_panics() {
     let inputs = vec![&env, BytesN::from_array(&env, &[1u8; 32])];
     client.verify(&test_proof(&env), &inputs);
 }
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn non_canonical_input_is_rejected() {
+    let env = Env::default();
+    let vk = test_vk(&env, 1);
+    let id = env.register(ZkVerifier, (symbol_short!("transfer"), vk));
+    let client = ZkVerifierClient::new(&env, &id);
+
+    // The group order r itself: one more than the largest canonical
+    // scalar. The host would reduce it to 0, so a proof for input 0
+    // would verify under both encodings — reject it instead.
+    let mut r = super::FR_MINUS_ONE;
+    r[31] = 0x01;
+    let inputs = vec![&env, BytesN::from_array(&env, &r)];
+    client.verify(&test_proof(&env), &inputs);
+}
+
+#[test]
+fn largest_canonical_input_is_accepted() {
+    let env = Env::default();
+    let vk = test_vk(&env, 1);
+    let id = env.register(ZkVerifier, (symbol_short!("transfer"), vk));
+    let client = ZkVerifierClient::new(&env, &id);
+
+    // r - 1 is canonical: must reach the pairing check (and fail it,
+    // since the key/proof are arbitrary points) instead of panicking.
+    let inputs = vec![&env, BytesN::from_array(&env, &super::FR_MINUS_ONE)];
+    assert!(!client.verify(&test_proof(&env), &inputs));
+}
