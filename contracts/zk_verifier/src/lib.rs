@@ -137,3 +137,5 @@ impl Verifier for ZkVerifier {
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_real_proof;
