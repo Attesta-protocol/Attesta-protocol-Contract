@@ -36,6 +36,7 @@
 
 #![deny(missing_docs)]
 
+pub mod encoding;
 pub mod merkle;
 pub mod note;
 pub mod poseidon;
