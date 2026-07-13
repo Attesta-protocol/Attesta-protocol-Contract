@@ -46,6 +46,8 @@ struct Setup {
     user: Address,
 }
 
+const ROTATION_DELAY: u64 = 86_400;
+
 fn setup(verifier_accepts: bool, gate: Option<GateConfig>) -> Setup {
     let env = Env::default();
     env.mock_all_auths();
@@ -68,6 +70,7 @@ fn setup(verifier_accepts: bool, gate: Option<GateConfig>) -> Setup {
             asset.address(),
             transfer_verifier,
             withdraw_verifier,
+            ROTATION_DELAY,
             gate,
         ),
     );
@@ -269,6 +272,7 @@ fn gated_pool_admits_attested_depositor() {
                 asset.address(),
                 verifier.clone(),
                 verifier,
+                ROTATION_DELAY,
                 Some(GateConfig {
                     registry,
                     required_claim: ClaimType::KycLevel(2),
@@ -303,6 +307,7 @@ fn gated_pool_rejects_unattested_depositor() {
                 asset.address(),
                 verifier.clone(),
                 verifier,
+                ROTATION_DELAY,
                 Some(GateConfig {
                     registry,
                     required_claim: ClaimType::KycLevel(2),

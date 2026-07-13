@@ -67,6 +67,8 @@ fn bytes32(env: &Env, x: Fr) -> BytesN<32> {
 
 /// The contract's recipient binding, recomputed test-side so the
 /// withdraw proof can be generated over it.
+const ROTATION_DELAY: u64 = 86_400;
+
 fn recipient_binding(env: &Env, address: &Address) -> Fr {
     use soroban_sdk::xdr::ToXdr;
     let digest = env.crypto().sha256(&address.clone().to_xdr(env));
@@ -117,6 +119,7 @@ fn full_flow_deposit_transfer_withdraw_with_real_proofs() {
                 asset.address(),
                 transfer_verifier,
                 withdraw_verifier,
+                ROTATION_DELAY,
                 None::<GateConfig>,
             ),
         ),

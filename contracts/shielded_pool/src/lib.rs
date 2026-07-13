@@ -58,6 +58,23 @@ pub struct GateConfig {
     pub required_claim: ClaimType,
 }
 
+/// The two verifier bindings a pool holds, addressable for rotation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VerifierSlot {
+    Transfer,
+    Withdraw,
+}
+
+/// A queued verifier rotation, executable once its timelock elapses.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingRotation {
+    pub verifier: Address,
+    /// Earliest ledger timestamp at which the rotation may execute.
+    pub eta: u64,
+}
+
 #[contracttype]
 enum DataKey {
     Admin,
@@ -65,6 +82,8 @@ enum DataKey {
     TransferVerifier,
     WithdrawVerifier,
     Gate,
+    RotationDelay,
+    PendingRotation(VerifierSlot),
     NextIndex,
     FilledSubtrees,
     Zeros,
@@ -106,6 +125,33 @@ pub struct Withdraw {
     pub amount: i128,
 }
 
+/// A verifier rotation entered the timelock queue. Integrators and
+/// provers should watch these: after execution, proofs must target the
+/// new verifier's circuit and keys.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationQueued {
+    #[topic]
+    pub slot: VerifierSlot,
+    pub verifier: Address,
+    pub eta: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationCanceled {
+    #[topic]
+    pub slot: VerifierSlot,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationExecuted {
+    #[topic]
+    pub slot: VerifierSlot,
+    pub verifier: Address,
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PoolError {
@@ -117,6 +163,8 @@ pub enum PoolError {
     InvalidProof = 6,
     AttestationRequired = 7,
     MalformedRequest = 8,
+    UnknownRotation = 9,
+    TimelockNotElapsed = 10,
 }
 
 #[contract]
@@ -127,6 +175,9 @@ impl ShieldedPool {
     /// * `token` — the single asset this pool wraps.
     /// * `transfer_verifier` / `withdraw_verifier` — `zk_verifier` instances
     ///   pinned to the transfer and withdraw circuits.
+    /// * `rotation_delay` — timelock delay in seconds for verifier
+    ///   rotations (circuit upgrades deploy new verifier instances and
+    ///   switch the pool over through [`Self::queue_verifier_rotation`]).
     /// * `gate` — optional attestation requirement for deposits.
     pub fn __constructor(
         env: Env,
@@ -134,6 +185,7 @@ impl ShieldedPool {
         token: Address,
         transfer_verifier: Address,
         withdraw_verifier: Address,
+        rotation_delay: u64,
         gate: Option<GateConfig>,
     ) {
         let storage = env.storage().instance();
@@ -141,6 +193,7 @@ impl ShieldedPool {
         storage.set(&DataKey::Token, &token);
         storage.set(&DataKey::TransferVerifier, &transfer_verifier);
         storage.set(&DataKey::WithdrawVerifier, &withdraw_verifier);
+        storage.set(&DataKey::RotationDelay, &rotation_delay);
         if let Some(g) = gate {
             storage.set(&DataKey::Gate, &g);
         }
@@ -334,6 +387,60 @@ impl ShieldedPool {
             amount,
         }
         .publish(&env);
+    }
+
+    // ── Verifier rotation (timelocked circuit upgrades) ─────────────────
+
+    /// Queue a rotation of `slot` to `new_verifier`, executable after the
+    /// pool's rotation delay. Verifying keys are immutable per verifier
+    /// instance, so this is the only path by which the circuits a pool
+    /// accepts proofs from can change — and it is announced on-chain for
+    /// the full delay before taking effect. Re-queuing a slot replaces
+    /// its pending rotation (and restarts the clock).
+    pub fn queue_verifier_rotation(env: Env, slot: VerifierSlot, new_verifier: Address) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        let delay: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RotationDelay)
+            .unwrap();
+        let eta = env.ledger().timestamp() + delay;
+        env.storage().instance().set(
+            &DataKey::PendingRotation(slot.clone()),
+            &PendingRotation {
+                verifier: new_verifier.clone(),
+                eta,
+            },
+        );
+        RotationQueued {
+            slot,
+            verifier: new_verifier,
+            eta,
+        }
+        .publish(&env);
+    }
+
+    /// Cancel the pending rotation of `slot` before execution.
+    pub fn cancel_verifier_rotation(env: Env, slot: VerifierSlot) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::PendingRotation(slot.clone()))
+        {
+            panic_with_error!(&env, PoolError::UnknownRotation);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingRotation(slot.clone()));
+        RotationCanceled { slot }.publish(&env);
+    }
+
+    /// The pending rotation of `slot`, for integrators watching upgrades.
+    pub fn pending_rotation(env: Env, slot: VerifierSlot) -> Option<PendingRotation> {
+        env.storage().instance().get(&DataKey::PendingRotation(slot))
     }
 
     // ── Public state queries for provers and indexers ──────────────────

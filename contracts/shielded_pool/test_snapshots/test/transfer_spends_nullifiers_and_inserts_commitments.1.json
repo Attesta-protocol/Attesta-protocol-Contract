@@ -524,6 +524,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "RotationDelay"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "86400"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Token"
                           }
                         ]
