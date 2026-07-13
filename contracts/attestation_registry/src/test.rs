@@ -29,6 +29,7 @@ const DELAY: u64 = 3600;
 struct Setup {
     env: Env,
     registry: AttestationRegistryClient<'static>,
+    issuer_registry: IssuerRegistryClient<'static>,
     issuer: Address,
     issuer_key: BytesN<32>,
     user: Address,
@@ -61,6 +62,7 @@ fn setup(verifier_accepts: bool) -> Setup {
     Setup {
         env,
         registry,
+        issuer_registry,
         issuer,
         issuer_key,
         user,
@@ -185,4 +187,84 @@ fn claim_kind_without_verifier_rejected() {
         &BytesN::from_array(&s.env, &[7u8; 32]),
         &(s.env.ledger().timestamp() + 1000),
     );
+}
+
+#[test]
+fn attestation_valid_at_exact_expiry_boundary() {
+    // expires_at is inclusive: "valid through" the stated timestamp,
+    // invalid strictly after. Pins the boundary so integrators can rely
+    // on it.
+    let s = setup(true);
+    let cred = BytesN::from_array(&s.env, &[7u8; 32]);
+    let expires_at = s.env.ledger().timestamp() + 1000;
+    present_kyc(&s, &cred, expires_at);
+
+    s.env.ledger().with_mut(|l| l.timestamp = expires_at);
+    assert!(s.registry.check(&s.user, &ClaimType::KycLevel(2)));
+    s.env.ledger().with_mut(|l| l.timestamp += 1);
+    assert!(!s.registry.check(&s.user, &ClaimType::KycLevel(2)));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn present_rejects_already_expired_attestation() {
+    let s = setup(true);
+    let now = s.env.ledger().timestamp();
+    present_kyc(&s, &BytesN::from_array(&s.env, &[7u8; 32]), now);
+}
+
+#[test]
+fn new_credential_recovers_from_revocation() {
+    // The recovery path: after an issuer revokes a credential, the user
+    // re-verifies with the issuer and presents a fresh credential — the
+    // old revocation must not taint the new attestation.
+    let s = setup(true);
+    let old_cred = BytesN::from_array(&s.env, &[7u8; 32]);
+    present_kyc(&s, &old_cred, s.env.ledger().timestamp() + 1000);
+    s.registry.revoke_credential(&s.issuer, &old_cred);
+    assert!(!s.registry.check(&s.user, &ClaimType::KycLevel(2)));
+
+    let new_cred = BytesN::from_array(&s.env, &[8u8; 32]);
+    present_kyc(&s, &new_cred, s.env.ledger().timestamp() + 1000);
+    assert!(s.registry.check(&s.user, &ClaimType::KycLevel(2)));
+
+    // And revoking the old ref again changes nothing for the new one.
+    assert_eq!(
+        s.registry
+            .get_attestation(&s.user, &ClaimType::KycLevel(2))
+            .unwrap()
+            .credential_ref,
+        new_cred
+    );
+}
+
+#[test]
+fn issuer_removal_blocks_new_presentations_not_old_attestations() {
+    // Removing an issuer stops its key validating new presentations
+    // immediately; already-recorded attestations live until expiry or
+    // per-credential revocation. This is deliberate: removal is
+    // curation, not an emergency kill switch — pin the policy.
+    let s = setup(true);
+    let cred = BytesN::from_array(&s.env, &[7u8; 32]);
+    present_kyc(&s, &cred, s.env.ledger().timestamp() + 100_000);
+
+    let id = s
+        .issuer_registry
+        .queue(&Action::RemoveIssuer(s.issuer.clone()));
+    s.env.ledger().with_mut(|l| l.timestamp += DELAY);
+    s.issuer_registry.execute(&id);
+
+    // Old attestation still checks...
+    assert!(s.registry.check(&s.user, &ClaimType::KycLevel(2)));
+    // ...but the removed issuer's key can no longer present.
+    let result = s.registry.try_present(
+        &s.user,
+        &dummy_proof(&s.env),
+        &ClaimType::KycLevel(3),
+        &Bytes::from_slice(&s.env, b"ctx"),
+        &s.issuer_key,
+        &BytesN::from_array(&s.env, &[9u8; 32]),
+        &(s.env.ledger().timestamp() + 1000),
+    );
+    assert!(result.is_err());
 }
