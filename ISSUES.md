@@ -1,5 +1,10 @@
 # Issue backlog
 
+> **Filed:** these are live on the tracker as
+> [issues #1–#10](https://github.com/Attesta-protocol/Attesta-protocol-Contract/issues)
+> (numbering matches). The tracker is the source of truth for status;
+> this file preserves the full specifications.
+
 Ten scoped, ready-to-file issues derived from the current state of the
 repo and the [roadmap](./README.md#roadmap). Each follows the
 [issue taxonomy](./CONTRIBUTING.md): a layer label, a difficulty label,
