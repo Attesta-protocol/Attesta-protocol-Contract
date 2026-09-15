@@ -163,10 +163,22 @@ fn full_flow_deposit_transfer_withdraw_with_real_proofs() {
     };
 
     let mut tree = MerkleTree::new(POOL_TREE_DEPTH);
-    pool.deposit(&user, &token.address, &600, &bytes32(&env, n1.commitment()));
+    pool.deposit(
+        &user,
+        &token.address,
+        &600,
+        &bytes32(&env, n1.owner_pk),
+        &bytes32(&env, n1.blinding),
+    );
     record_cost(&env, "deposit");
     let i1 = tree.insert(n1.commitment());
-    pool.deposit(&user, &token.address, &400, &bytes32(&env, n2.commitment()));
+    pool.deposit(
+        &user,
+        &token.address,
+        &400,
+        &bytes32(&env, n2.owner_pk),
+        &bytes32(&env, n2.blinding),
+    );
     let i2 = tree.insert(n2.commitment());
 
     // Tree lockstep: the on-chain Poseidon tree tracks the prover's.

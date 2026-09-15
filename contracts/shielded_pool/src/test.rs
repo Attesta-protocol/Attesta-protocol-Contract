@@ -80,8 +80,20 @@ fn setup(verifier_accepts: bool, gate: Option<GateConfig>) -> Setup {
     }
 }
 
+/// An arbitrary but distinct, canonical field element — used both as a
+/// stand-in `new_commitments` entry for `transfer` (which accepts them
+/// opaquely) and as a component of a `deposit` note below.
 fn commitment(env: &Env, seed: u8) -> BytesN<32> {
     BytesN::from_array(env, &[seed; 32])
+}
+
+/// `(owner_pk, blinding)` for a deposit note: `deposit` derives the
+/// commitment itself, so tests only need to supply these two components.
+fn owner_and_blinding(env: &Env, seed: u8) -> (BytesN<32>, BytesN<32>) {
+    (
+        commitment(env, seed),
+        commitment(env, seed.wrapping_add(50)),
+    )
 }
 
 fn dummy_proof(env: &Env) -> Groth16Proof {
@@ -97,8 +109,9 @@ fn deposit_locks_tokens_and_grows_tree() {
     let s = setup(true, None);
     let root_before = s.pool.root();
 
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &500, &owner_pk, &blinding);
 
     assert_eq!(s.token.balance(&s.user), 999_500);
     assert_eq!(s.token.balance(&s.pool.address), 500);
@@ -119,23 +132,25 @@ fn deposit_rejects_foreign_token() {
         .env
         .register_stellar_asset_contract_v2(other_admin)
         .address();
-    s.pool
-        .deposit(&s.user, &other, &500, &commitment(&s.env, 1));
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
+    s.pool.deposit(&s.user, &other, &500, &owner_pk, &blinding);
 }
 
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")]
 fn deposit_rejects_nonpositive_amount() {
     let s = setup(true, None);
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &0, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &0, &owner_pk, &blinding);
 }
 
 #[test]
 fn transfer_spends_nullifiers_and_inserts_commitments() {
     let s = setup(true, None);
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &500, &owner_pk, &blinding);
     let root = s.pool.root();
 
     let nullifier = BytesN::from_array(&s.env, &[9u8; 32]);
@@ -163,8 +178,9 @@ fn transfer_spends_nullifiers_and_inserts_commitments() {
 #[should_panic(expected = "Error(Contract, #5)")]
 fn transfer_rejects_double_spend() {
     let s = setup(true, None);
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &500, &owner_pk, &blinding);
     let root = s.pool.root();
     let nullifier = BytesN::from_array(&s.env, &[9u8; 32]);
     let notes = vec![&s.env, Bytes::from_slice(&s.env, b"ct")];
@@ -203,8 +219,9 @@ fn transfer_rejects_unknown_root() {
 #[should_panic(expected = "Error(Contract, #6)")]
 fn transfer_rejects_invalid_proof() {
     let s = setup(false, None);
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &500, &owner_pk, &blinding);
     let root = s.pool.root();
     s.pool.transfer(
         &dummy_proof(&s.env),
@@ -218,8 +235,9 @@ fn transfer_rejects_invalid_proof() {
 #[test]
 fn withdraw_pays_out_and_spends_nullifier() {
     let s = setup(true, None);
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &500, &owner_pk, &blinding);
     let root = s.pool.root();
     let recipient = Address::generate(&s.env);
     let nullifier = BytesN::from_array(&s.env, &[9u8; 32]);
@@ -236,8 +254,9 @@ fn withdraw_pays_out_and_spends_nullifier() {
 #[should_panic(expected = "Error(Contract, #5)")]
 fn withdraw_rejects_spent_nullifier() {
     let s = setup(true, None);
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &500, &owner_pk, &blinding);
     let root = s.pool.root();
     let recipient = Address::generate(&s.env);
     let nullifier = BytesN::from_array(&s.env, &[9u8; 32]);
@@ -277,7 +296,8 @@ fn gated_pool_admits_attested_depositor() {
         ),
     );
 
-    pool.deposit(&user, &asset.address(), &100, &commitment(&env, 1));
+    let (owner_pk, blinding) = owner_and_blinding(&env, 1);
+    pool.deposit(&user, &asset.address(), &100, &owner_pk, &blinding);
     assert_eq!(pool.size(), 1);
 }
 
@@ -311,7 +331,8 @@ fn gated_pool_rejects_unattested_depositor() {
         ),
     );
 
-    pool.deposit(&user, &asset.address(), &100, &commitment(&env, 1));
+    let (owner_pk, blinding) = owner_and_blinding(&env, 1);
+    pool.deposit(&user, &asset.address(), &100, &owner_pk, &blinding);
 }
 
 #[test]
@@ -351,24 +372,62 @@ fn deposit_rejects_amount_above_note_range() {
     // spent or withdrawn, so the pool refuses to strand it.
     let s = setup(true, None);
     let too_big = (u64::MAX as i128) + 1;
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &too_big, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &too_big, &owner_pk, &blinding);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #8)")]
-fn deposit_rejects_non_canonical_commitment() {
+fn deposit_commitment_is_derived_from_amount_and_owner() {
+    // The regression test for the inflation bug: `deposit` must not trust
+    // a caller-supplied commitment. It derives `H(H(amount, owner_pk),
+    // blinding)` itself, so the inserted leaf — and therefore the note a
+    // depositor can later spend — is pinned to the tokens they actually
+    // transferred in. This reproduces that derivation independently (via
+    // the same on-chain Poseidon hash2 used everywhere else) and checks
+    // the resulting root against the pool's, rather than trusting
+    // whatever the pool decided to insert.
     let s = setup(true, None);
-    // The scalar field order r: reduces to 0 mod r, so it aliases the
-    // zero leaf under a different byte string.
-    let mut r = attesta_interfaces::fr::FR_MINUS_ONE;
-    r[31] = 0x01;
-    s.pool.deposit(
-        &s.user,
-        &s.token.address,
-        &500,
-        &BytesN::from_array(&s.env, &r),
+    let owner_pk = BytesN::from_array(&s.env, &[7u8; 32]);
+    let blinding = BytesN::from_array(&s.env, &[9u8; 32]);
+    let amount: i128 = 500;
+
+    s.pool
+        .deposit(&s.user, &s.token.address, &amount, &owner_pk, &blinding);
+
+    let mut value_bytes = [0u8; 32];
+    value_bytes[16..].copy_from_slice(&amount.to_be_bytes());
+    let value_field = BytesN::from_array(&s.env, &value_bytes);
+    let expected_commitment = crate::poseidon::hash2(
+        &s.env,
+        &crate::poseidon::hash2(&s.env, &value_field, &owner_pk),
+        &blinding,
     );
+
+    // First leaf in an empty tree: the root is the commitment hashed up
+    // the all-zero sibling chain, exactly as `insert_commitment` computes
+    // it for index 0.
+    let mut node = expected_commitment.clone();
+    for z in crate::poseidon_params::ZEROS
+        .iter()
+        .take(TREE_DEPTH as usize)
+    {
+        node = crate::poseidon::hash2(&s.env, &node, &BytesN::from_array(&s.env, z));
+    }
+    assert_eq!(s.pool.root(), node);
+
+    // A depositor cannot claim a shielded value other than what they paid
+    // in: a note built from a different amount produces a different leaf
+    // and therefore a different root.
+    let mut other_value_bytes = [0u8; 32];
+    other_value_bytes[16..].copy_from_slice(&(amount + 1).to_be_bytes());
+    let other_value_field = BytesN::from_array(&s.env, &other_value_bytes);
+    let mismatched_commitment = crate::poseidon::hash2(
+        &s.env,
+        &crate::poseidon::hash2(&s.env, &other_value_field, &owner_pk),
+        &blinding,
+    );
+    assert_ne!(expected_commitment, mismatched_commitment);
 }
 
 #[test]
@@ -398,8 +457,9 @@ fn verifier_rotation_respects_timelock() {
     assert!(s.pool.pending_rotation(&VerifierSlot::Transfer).is_none());
 
     // The rotated-in verifier rejects everything: transfers now fail.
+    let (owner_pk, blinding) = owner_and_blinding(&s.env, 1);
     s.pool
-        .deposit(&s.user, &s.token.address, &500, &commitment(&s.env, 1));
+        .deposit(&s.user, &s.token.address, &500, &owner_pk, &blinding);
     let root = s.pool.root();
     let result = s.pool.try_transfer(
         &dummy_proof(&s.env),

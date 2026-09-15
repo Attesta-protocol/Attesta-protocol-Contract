@@ -29,11 +29,13 @@ attesta-prover pk --sk <hex>              # re-derive pk from sk
 attesta-prover note --value 500 --owner-pk <hex>   # [--blinding <hex>]
 ```
 
-`note` prints the commitment to deposit with
-(`shielded_pool::deposit(from, token, amount, commitment)`) and the
-blinding that spending it later requires. **Keep `sk` and each note's
-`blinding` — losing either loses the funds; leaking `sk` loses them to
-someone else.**
+`note` prints the `owner_pk` and `blinding` to deposit with
+(`shielded_pool::deposit(from, token, amount, owner_pk, blinding)` —
+the contract derives the commitment itself from these plus the amount
+transferred, so a note's shielded value can never diverge from what was
+actually paid in) and the blinding that spending it later requires.
+**Keep `sk` and each note's `blinding` — losing either loses the funds;
+leaking `sk` loses them to someone else.**
 
 All hex field arguments are 32-byte big-endian scalars and must be
 canonical (< the BLS12-381 scalar field order); values and leaf

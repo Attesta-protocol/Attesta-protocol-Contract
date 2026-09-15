@@ -170,12 +170,17 @@ commitment it spends — that link exists only inside the proof.
 
 ### Deposits (public → shielded)
 
-`deposit(from, token, amount, commitment)` transfers `amount` of the
-pool's token from the depositor and appends their commitment to the
+`deposit(from, token, amount, owner_pk, blinding)` transfers `amount` of
+the pool's token from the depositor and appends a note commitment to the
 tree, emitting a `Deposit` event with the assigned `leaf_index`. The
-deposit amount is public (it's a normal token transfer in); privacy
-begins once value is inside the pool. If the pool was constructed with
-an attestation gate, the depositor must hold a valid compliance
+commitment — `H(H(amount, owner_pk), blinding)` — is computed **on-chain**
+from the amount actually transferred, not accepted as an opaque value
+from the caller: a depositor never gets to name a note's shielded value
+independently of what they paid in, which is what makes "pool balance ==
+sum of shielded notes" an enforced invariant rather than an unverified
+claim. The deposit amount is public (it's a normal token transfer in);
+privacy begins once value is inside the pool. If the pool was constructed
+with an attestation gate, the depositor must hold a valid compliance
 attestation in the `attestation_registry` — this is what makes it a
 compliant-by-construction pool rather than a mixer.
 
@@ -280,7 +285,7 @@ runs; the attestation circuits are M5.
 
 | Function | Purpose |
 | --- | --- |
-| `deposit(from, token, amount, commitment)` | Public → shielded: locks tokens, inserts note commitment into the Merkle tree (checks the attestation gate if the pool is gated) |
+| `deposit(from, token, amount, owner_pk, blinding)` | Public → shielded: locks tokens, derives the note commitment on-chain from `(amount, owner_pk, blinding)` and inserts it into the Merkle tree (checks the attestation gate if the pool is gated) |
 | `transfer(proof, nullifiers, new_commitments, encrypted_notes, root)` | Shielded transfer: verifies the ZK proof (balance preserved, notes owned, no double-spend) against a recent root, spends nullifiers, inserts new commitments, emits encrypted notes for the recipient |
 | `withdraw(proof, nullifier, to, amount, root)` | Shielded → public: exits the pool with a validity proof bound to the recipient, so a relayer cannot redirect funds |
 | `root()` / `is_known_root(root)` / `is_spent(nullifier)` / `size()` | Public state queries for provers and indexers |

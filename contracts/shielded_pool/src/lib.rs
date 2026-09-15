@@ -12,9 +12,12 @@
 //!
 //! **Per-token pools:** one instance wraps exactly one token (USDC pool,
 //! EURC pool), so value can never cross assets invisibly. The contract's
-//! token balance always equals the sum of shielded notes — insolvency or
-//! inflation bugs are externally detectable even though individual amounts
-//! are hidden.
+//! token balance always equals the sum of shielded notes — enforced at
+//! `deposit`, which derives the note commitment on-chain from the amount
+//! actually transferred rather than trusting a caller-supplied commitment,
+//! so a note's shielded value can never diverge from the tokens that
+//! backed it, even though individual amounts are hidden once inside the
+//! pool.
 //!
 //! **Compliant-by-construction (optional):** the pool may be constructed
 //! with an attestation gate; deposits then require a valid compliance
@@ -214,26 +217,34 @@ impl ShieldedPool {
             .set(&DataKey::KnownRoot(empty_root), &true);
     }
 
-    /// Public → shielded: locks `amount` of the pool token and inserts the
-    /// client-computed note `commitment` into the Merkle tree.
+    /// Public → shielded: locks `amount` of the pool token and inserts a
+    /// note commitment for `(amount, owner_pk, blinding)` into the Merkle
+    /// tree.
     ///
-    /// The commitment binds `(value, owner_pk, blinding)`; the contract
-    /// never learns the note's internal structure beyond `amount` (which is
-    /// necessarily public at the pool boundary).
-    pub fn deposit(env: Env, from: Address, token: Address, amount: i128, commitment: BytesN<32>) {
+    /// The commitment is derived **on-chain** from the amount actually
+    /// transferred — `cm = H(H(amount, owner_pk), blinding)` — rather than
+    /// accepted as an opaque value from the caller. This is what makes the
+    /// pool's core invariant (token balance == sum of shielded note values)
+    /// an enforced fact instead of an unverified claim: a note's shielded
+    /// value can never diverge from the tokens that actually backed it,
+    /// since the depositor never gets to name the value independently of
+    /// `amount`. `owner_pk` and `blinding` are not secret — the amount and
+    /// depositor are already public at this boundary — so revealing them
+    /// here loses nothing the deposit doesn't already disclose.
+    pub fn deposit(
+        env: Env,
+        from: Address,
+        token: Address,
+        amount: i128,
+        owner_pk: BytesN<32>,
+        blinding: BytesN<32>,
+    ) {
         from.require_auth();
         // Note values are 64-bit in the circuits (range-checked by bit
         // decomposition), so an amount above u64::MAX could enter the
         // pool but never be spent or withdrawn — reject it here.
         if amount <= 0 || amount > u64::MAX as i128 {
             panic_with_error!(&env, PoolError::InvalidAmount);
-        }
-        // The tree is keyed on commitment bytes; only the canonical
-        // field-element encoding may enter (the host reduces mod r
-        // silently, so a non-canonical byte string would name a leaf the
-        // prover-side tree spells differently).
-        if !attesta_interfaces::fr::is_canonical(&commitment.to_array()) {
-            panic_with_error!(&env, PoolError::MalformedRequest);
         }
         let pool_token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         if token != pool_token {
@@ -253,6 +264,13 @@ impl ShieldedPool {
 
         let pool_address = env.current_contract_address();
         token::TokenClient::new(&env, &pool_token).transfer(&from, &pool_address, &amount);
+
+        let value_field = amount_to_field(&env, amount);
+        let commitment = poseidon::hash2(
+            &env,
+            &poseidon::hash2(&env, &value_field, &owner_pk),
+            &blinding,
+        );
         let (index, new_root) = insert_commitment(&env, &commitment);
 
         Deposit {

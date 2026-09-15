@@ -152,7 +152,10 @@ fn cmd_note(args: &[String]) -> Result<(), String> {
     println!("owner_pk={}", hex32(owner_pk));
     println!("blinding={}", hex32(blinding));
     println!("commitment={}", hex32(note.commitment()));
-    eprintln!("deposit with `commitment`; keep `blinding` — spending needs it");
+    eprintln!(
+        "deposit with `owner_pk` and `blinding` (the contract derives \
+         `commitment` on-chain from these plus the amount); keep `blinding` — spending needs it"
+    );
     Ok(())
 }
 
