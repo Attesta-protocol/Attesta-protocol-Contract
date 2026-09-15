@@ -509,3 +509,56 @@ fn requeue_replaces_pending_rotation_and_restarts_clock() {
     s.pool.execute_verifier_rotation(&VerifierSlot::Transfer);
     assert_eq!(s.pool.verifier(&VerifierSlot::Transfer), second);
 }
+
+#[test]
+fn admin_rotation_respects_timelock_and_takes_effect() {
+    let s = setup(true, None);
+    let old_admin = s.pool.admin();
+    let new_admin = Address::generate(&s.env);
+    assert_ne!(old_admin, new_admin);
+
+    assert!(s.pool.pending_admin_rotation().is_none());
+    s.pool.queue_admin_rotation(&new_admin);
+    let pending = s.pool.pending_admin_rotation().unwrap();
+    assert_eq!(pending.admin, new_admin);
+    assert_eq!(s.pool.admin(), old_admin); // unchanged until executed
+
+    // Before the delay elapses, execution must fail.
+    assert!(s.pool.try_execute_admin_rotation().is_err());
+
+    s.env.ledger().with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.pool.execute_admin_rotation();
+    assert_eq!(s.pool.admin(), new_admin);
+    assert!(s.pool.pending_admin_rotation().is_none());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn canceled_admin_rotation_cannot_execute() {
+    let s = setup(true, None);
+    let new_admin = Address::generate(&s.env);
+    s.pool.queue_admin_rotation(&new_admin);
+    s.pool.cancel_admin_rotation();
+    s.env.ledger().with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.pool.execute_admin_rotation();
+}
+
+#[test]
+fn requeue_replaces_pending_admin_rotation_and_restarts_clock() {
+    let s = setup(true, None);
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+
+    s.pool.queue_admin_rotation(&first);
+    s.env
+        .ledger()
+        .with_mut(|l| l.timestamp += ROTATION_DELAY - 1);
+    s.pool.queue_admin_rotation(&second);
+
+    s.env.ledger().with_mut(|l| l.timestamp += 1);
+    assert!(s.pool.try_execute_admin_rotation().is_err());
+
+    s.env.ledger().with_mut(|l| l.timestamp += ROTATION_DELAY);
+    s.pool.execute_admin_rotation();
+    assert_eq!(s.pool.admin(), second);
+}

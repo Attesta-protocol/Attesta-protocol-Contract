@@ -78,6 +78,15 @@ pub struct PendingRotation {
     pub eta: u64,
 }
 
+/// A queued admin handoff, executable once its timelock elapses.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingAdmin {
+    pub admin: Address,
+    /// Earliest ledger timestamp at which the rotation may execute.
+    pub eta: u64,
+}
+
 #[contracttype]
 enum DataKey {
     Admin,
@@ -87,6 +96,7 @@ enum DataKey {
     Gate,
     RotationDelay,
     PendingRotation(VerifierSlot),
+    PendingAdminRotation,
     NextIndex,
     FilledSubtrees,
     Zeros,
@@ -153,6 +163,24 @@ pub struct RotationExecuted {
     #[topic]
     pub slot: VerifierSlot,
     pub verifier: Address,
+}
+
+/// An admin handoff entered the timelock queue.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationQueued {
+    pub admin: Address,
+    pub eta: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationCanceled {}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationExecuted {
+    pub admin: Address,
 }
 
 #[contracterror]
@@ -491,6 +519,86 @@ impl ShieldedPool {
         env.storage()
             .instance()
             .get(&DataKey::PendingRotation(slot))
+    }
+
+    // ── Admin rotation (timelocked governance handoff) ──────────────────
+
+    /// Queue a handoff of admin to `new_admin`, executable after the
+    /// pool's rotation delay. Reuses the same delay and require-auth
+    /// pattern as verifier rotation: a compromised or careless rotation
+    /// is visible on-chain for the full delay before it takes effect, and
+    /// re-queuing replaces any pending handoff (restarting the clock).
+    pub fn queue_admin_rotation(env: Env, new_admin: Address) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        let delay: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RotationDelay)
+            .unwrap();
+        let eta = env.ledger().timestamp() + delay;
+        env.storage().instance().set(
+            &DataKey::PendingAdminRotation,
+            &PendingAdmin {
+                admin: new_admin.clone(),
+                eta,
+            },
+        );
+        AdminRotationQueued {
+            admin: new_admin,
+            eta,
+        }
+        .publish(&env);
+    }
+
+    /// Cancel the pending admin handoff before execution.
+    pub fn cancel_admin_rotation(env: Env) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        if !env.storage().instance().has(&DataKey::PendingAdminRotation) {
+            panic_with_error!(&env, PoolError::UnknownRotation);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminRotation);
+        AdminRotationCanceled {}.publish(&env);
+    }
+
+    /// Execute the pending admin handoff once its timelock has elapsed.
+    /// The outgoing admin must still authorize this call, matching the
+    /// verifier-rotation pattern: a rotation is announced governance, not
+    /// unilateral abdication by anyone who notices the timelock elapsed.
+    pub fn execute_admin_rotation(env: Env) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        let pending: PendingAdmin = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminRotation)
+            .unwrap_or_else(|| panic_with_error!(&env, PoolError::UnknownRotation));
+        if env.ledger().timestamp() < pending.eta {
+            panic_with_error!(&env, PoolError::TimelockNotElapsed);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminRotation);
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &pending.admin);
+        AdminRotationExecuted {
+            admin: pending.admin,
+        }
+        .publish(&env);
+    }
+
+    /// The pending admin handoff, for integrators watching governance.
+    pub fn pending_admin_rotation(env: Env) -> Option<PendingAdmin> {
+        env.storage().instance().get(&DataKey::PendingAdminRotation)
+    }
+
+    /// The current admin.
+    pub fn admin(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
     /// The verifier currently bound to `slot`, for provers picking the
