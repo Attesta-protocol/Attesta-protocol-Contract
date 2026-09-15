@@ -51,6 +51,44 @@ the pool's events: each `Deposit` appends its `commitment` at
 this log, so it must be complete and in order — a wrong log produces a
 root the contract does not know.
 
+## Key loading: integrity-checked fast path
+
+`--proving-key` loads through `attesta_circuits::artifacts::load_proving_key`,
+which looks for a `SHA256SUMS` file next to the key (the format
+`scripts/build-artifacts.sh` emits — `<hex>  <filename>` per line). If
+the key's own SHA-256 matches the recorded entry, loading uses
+arkworks' unchecked deserializer: `deserialize_compressed` validates
+every curve point on the way in, which is redundant once the file's
+hash is already pinned, and that validation dominates startup for the
+4MB transfer key. A missing or mismatched `SHA256SUMS` entry always
+falls back to the fully validating path — there is no flag to skip
+validation without a matching hash.
+
+Measured with `cargo bench` (`circuits/benches/prover_bench.rs`),
+single-threaded, on a 2-core Intel Xeon Platinum 8370C @ 2.80GHz
+(rustc 1.98.1, release profile — a shared CI-class VM, not dedicated
+hardware, so treat these as ballpark, not a regression gate):
+
+| Benchmark | Time |
+| --- | --- |
+| `proving_key.bin` (transfer, 3,998,544 bytes) load — checked | 7.33 s |
+| — hash mismatch (falls back to checked) | 7.34 s |
+| — hash match (unchecked fast path) | **2.58 s (≈2.8×)** |
+| Merkle tree rebuild, 1,000 leaves | 0.69 s |
+| Merkle tree rebuild, 10,000 leaves | 6.92 s |
+| Merkle tree rebuild, 100,000 leaves | 72.96 s |
+| Transfer proof (2-in/2-out) | 2.54 s |
+| Withdraw proof | 1.46 s |
+
+The tree-rebuild numbers scale roughly linearly with leaf count — the
+prover currently rebuilds the full tree from the commitment log on
+every invocation (no persisted-tree cache), so a wallet with a large
+history pays this cost on every `prove-transfer`/`prove-withdraw` call.
+Fine today; worth a follow-up (a cached, incrementally-updated local
+tree) if provers start seeing six-figure leaf counts in practice.
+
+Run `cargo bench` from `circuits/` to reproduce on your machine.
+
 ## Proving a transfer
 
 ```sh
