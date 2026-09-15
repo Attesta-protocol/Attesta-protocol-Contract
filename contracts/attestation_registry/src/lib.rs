@@ -19,8 +19,13 @@
 //! the protocol's timelocked multi-sig (the same governance that curates
 //! the issuer registry), and every change is evented.
 //!
+//! Admin handoff is timelocked ([`AttestationRegistry::queue_admin_rotation`]):
+//! a compromised or careless rotation is visible on-chain for the full
+//! delay before it takes effect.
+//!
 //! ## Storage
-//! - Instance: `Admin`, `IssuerRegistry`, `Verifier(kind)`.
+//! - Instance: `Admin`, `IssuerRegistry`, `Verifier(kind)`, `RotationDelay`,
+//!   `PendingAdminRotation`.
 //! - Persistent: `Attestation(address, claim_type)` records,
 //!   `Revoked(credential_ref)` flags.
 
@@ -48,6 +53,15 @@ pub struct AttestationRecord {
     pub presented_at: u64,
 }
 
+/// A queued admin handoff, executable once its timelock elapses.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingAdmin {
+    pub admin: Address,
+    /// Earliest ledger timestamp at which the rotation may execute.
+    pub eta: u64,
+}
+
 #[contracttype]
 enum DataKey {
     Admin,
@@ -55,6 +69,8 @@ enum DataKey {
     Verifier(Symbol),
     Attestation(Address, ClaimType),
     Revoked(BytesN<32>),
+    RotationDelay,
+    PendingAdminRotation,
 }
 
 /// A claim kind was routed to a verifier instance.
@@ -87,6 +103,24 @@ pub struct CredentialRevoked {
     pub credential_ref: BytesN<32>,
 }
 
+/// An admin handoff entered the timelock queue.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationQueued {
+    pub admin: Address,
+    pub eta: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationCanceled {}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationExecuted {
+    pub admin: Address,
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AttestationError {
@@ -96,6 +130,8 @@ pub enum AttestationError {
     InvalidProof = 4,
     InvalidExpiry = 5,
     NotAnIssuer = 6,
+    UnknownRotation = 7,
+    TimelockNotElapsed = 8,
 }
 
 #[contract]
@@ -103,11 +139,16 @@ pub struct AttestationRegistry;
 
 #[contractimpl]
 impl AttestationRegistry {
-    pub fn __constructor(env: Env, admin: Address, issuer_registry: Address) {
+    /// * `rotation_delay` — timelock delay in seconds for admin handoffs
+    ///   ([`Self::queue_admin_rotation`]).
+    pub fn __constructor(env: Env, admin: Address, issuer_registry: Address, rotation_delay: u64) {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
             .set(&DataKey::IssuerRegistry, &issuer_registry);
+        env.storage()
+            .instance()
+            .set(&DataKey::RotationDelay, &rotation_delay);
     }
 
     /// Route a claim kind to the `zk_verifier` instance pinned to its
@@ -241,6 +282,84 @@ impl AttestationRegistry {
         env.storage()
             .persistent()
             .get(&DataKey::Attestation(address, claim_type))
+    }
+
+    // ── Admin rotation (timelocked governance handoff) ──────────────────
+
+    /// Queue a handoff of admin to `new_admin`, executable after the
+    /// registry's rotation delay. Re-queuing replaces any pending handoff
+    /// (restarting the clock).
+    pub fn queue_admin_rotation(env: Env, new_admin: Address) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        let delay: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RotationDelay)
+            .unwrap();
+        let eta = env.ledger().timestamp() + delay;
+        env.storage().instance().set(
+            &DataKey::PendingAdminRotation,
+            &PendingAdmin {
+                admin: new_admin.clone(),
+                eta,
+            },
+        );
+        AdminRotationQueued {
+            admin: new_admin,
+            eta,
+        }
+        .publish(&env);
+    }
+
+    /// Cancel the pending admin handoff before execution.
+    pub fn cancel_admin_rotation(env: Env) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        if !env.storage().instance().has(&DataKey::PendingAdminRotation) {
+            panic_with_error!(&env, AttestationError::UnknownRotation);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminRotation);
+        AdminRotationCanceled {}.publish(&env);
+    }
+
+    /// Execute the pending admin handoff once its timelock has elapsed.
+    /// The outgoing admin must still authorize this call — a rotation is
+    /// announced governance, not unilateral abdication by anyone who
+    /// notices the timelock elapsed.
+    pub fn execute_admin_rotation(env: Env) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        let pending: PendingAdmin = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminRotation)
+            .unwrap_or_else(|| panic_with_error!(&env, AttestationError::UnknownRotation));
+        if env.ledger().timestamp() < pending.eta {
+            panic_with_error!(&env, AttestationError::TimelockNotElapsed);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminRotation);
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &pending.admin);
+        AdminRotationExecuted {
+            admin: pending.admin,
+        }
+        .publish(&env);
+    }
+
+    /// The pending admin handoff, for integrators watching governance.
+    pub fn pending_admin_rotation(env: Env) -> Option<PendingAdmin> {
+        env.storage().instance().get(&DataKey::PendingAdminRotation)
+    }
+
+    /// The current admin.
+    pub fn admin(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 }
 

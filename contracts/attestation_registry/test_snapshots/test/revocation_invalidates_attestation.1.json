@@ -564,6 +564,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "RotationDelay"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "3600"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Verifier"
                           },
                           {

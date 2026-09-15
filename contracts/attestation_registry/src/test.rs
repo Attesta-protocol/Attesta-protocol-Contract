@@ -54,7 +54,7 @@ fn setup(verifier_accepts: bool) -> Setup {
     env.ledger().with_mut(|l| l.timestamp += DELAY);
     issuer_registry.execute(&action_id);
 
-    let registry_id = env.register(AttestationRegistry, (admin, issuer_registry_id));
+    let registry_id = env.register(AttestationRegistry, (admin, issuer_registry_id, DELAY));
     let registry = AttestationRegistryClient::new(&env, &registry_id);
     let verifier = env.register(MockVerifier, (verifier_accepts,));
     registry.set_verifier(&Symbol::new(&env, "kyc_level"), &verifier);
@@ -266,5 +266,37 @@ fn issuer_removal_blocks_new_presentations_not_old_attestations() {
         &BytesN::from_array(&s.env, &[9u8; 32]),
         &(s.env.ledger().timestamp() + 1000),
     );
+    assert!(result.is_err());
+}
+
+#[test]
+fn admin_rotation_respects_timelock_and_takes_effect() {
+    let s = setup(true);
+    let old_admin = s.registry.admin();
+    let new_admin = Address::generate(&s.env);
+    assert_ne!(old_admin, new_admin);
+
+    assert!(s.registry.pending_admin_rotation().is_none());
+    s.registry.queue_admin_rotation(&new_admin);
+    let pending = s.registry.pending_admin_rotation().unwrap();
+    assert_eq!(pending.admin, new_admin);
+    assert_eq!(s.registry.admin(), old_admin); // unchanged until executed
+
+    assert!(s.registry.try_execute_admin_rotation().is_err());
+
+    s.env.ledger().with_mut(|l| l.timestamp += DELAY);
+    s.registry.execute_admin_rotation();
+    assert_eq!(s.registry.admin(), new_admin);
+    assert!(s.registry.pending_admin_rotation().is_none());
+}
+
+#[test]
+fn canceled_admin_rotation_cannot_execute() {
+    let s = setup(true);
+    let new_admin = Address::generate(&s.env);
+    s.registry.queue_admin_rotation(&new_admin);
+    s.registry.cancel_admin_rotation();
+    s.env.ledger().with_mut(|l| l.timestamp += DELAY);
+    let result = s.registry.try_execute_admin_rotation();
     assert!(result.is_err());
 }
