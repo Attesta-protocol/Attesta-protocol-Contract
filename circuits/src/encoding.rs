@@ -122,6 +122,7 @@ pub fn proof_to_bytes(proof: &Proof<Bls12_381>) -> ProofBytes {
 /// A verifying key in host encoding — the byte-for-byte contents of
 /// `attesta_interfaces::VerificationKey`, i.e. what a `zk_verifier`
 /// instance is constructed with.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerificationKeyBytes {
     /// `vk.alpha_g1`.
     pub alpha: [u8; G1_LEN],
@@ -151,6 +152,40 @@ mod tests {
     use super::*;
     use ark_ff::One;
     use std::ops::Neg;
+
+    mod proptests {
+        use super::*;
+        use ark_bls12_381::{G1Projective, G2Projective};
+        use ark_ec::PrimeGroup;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// `fr_from_bytes . fr_to_bytes` is identity on every scalar
+            /// reachable from arbitrary input bytes (mod-order reduction
+            /// means every 32-byte string names *some* canonical scalar).
+            #[test]
+            fn fr_roundtrips(bytes in prop::array::uniform32(any::<u8>())) {
+                let x = Fr::from_be_bytes_mod_order(&bytes);
+                prop_assert_eq!(fr_from_bytes(&fr_to_bytes(x)), x);
+            }
+
+            /// Same, for G1 points reachable as `generator * scalar`.
+            #[test]
+            fn g1_roundtrips(bytes in prop::array::uniform32(any::<u8>())) {
+                let s = Fr::from_be_bytes_mod_order(&bytes);
+                let p: G1Affine = (G1Projective::generator() * s).into();
+                prop_assert_eq!(g1_from_bytes(&g1_to_bytes(&p)), p);
+            }
+
+            /// Same, for G2.
+            #[test]
+            fn g2_roundtrips(bytes in prop::array::uniform32(any::<u8>())) {
+                let s = Fr::from_be_bytes_mod_order(&bytes);
+                let p: G2Affine = (G2Projective::generator() * s).into();
+                prop_assert_eq!(g2_from_bytes(&g2_to_bytes(&p)), p);
+            }
+        }
+    }
 
     // The standard uncompressed generator encodings, as documented for
     // the Soroban host functions (soroban-sdk `Bls12381G1Affine` /

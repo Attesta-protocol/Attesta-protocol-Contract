@@ -25,10 +25,9 @@
 
 use ark_bls12_381::{Bls12_381, Fr, G1Affine, G2Affine};
 use ark_ff::UniformRand;
-use ark_groth16::{Groth16, Proof, ProvingKey};
-use ark_serialize::CanonicalDeserialize;
+use ark_groth16::{Groth16, Proof};
 use ark_snark::SNARK;
-use attesta_circuits::artifacts::{parse_vk_hex, vk_from_bytes};
+use attesta_circuits::artifacts::{load_proving_key, parse_vk_hex, vk_from_bytes};
 use attesta_circuits::encoding::{
     fr_from_bytes, fr_to_bytes, g1_from_bytes, g2_from_bytes, G1_LEN, G2_LEN,
 };
@@ -161,11 +160,6 @@ fn cmd_note(args: &[String]) -> Result<(), String> {
 
 // ── file loading ────────────────────────────────────────────────────────
 
-fn load_proving_key(path: &str) -> Result<ProvingKey<Bls12_381>, String> {
-    let data = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    ProvingKey::deserialize_compressed(data.as_slice()).map_err(|e| format!("{path}: {e}"))
-}
-
 /// Reads the commitment log: one 32-byte hex leaf per line, leaf order.
 fn load_commitments(path: &str) -> Result<Vec<Fr>, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
@@ -210,7 +204,7 @@ fn bundle_field<'a>(bundle: &'a HashMap<String, String>, key: &str) -> Result<&'
 
 fn cmd_prove_transfer(args: &[String]) -> Result<(), String> {
     let flags = parse_flags(args)?;
-    let proving_key = load_proving_key(one(&flags, "proving-key")?)?;
+    let proving_key = load_proving_key(std::path::Path::new(one(&flags, "proving-key")?))?;
     let commitments = load_commitments(one(&flags, "commitments")?)?;
     let spends: [Spend; 2] = two(&flags, "spend")?;
     let outputs: [Output; 2] = two(&flags, "output")?;
@@ -244,7 +238,7 @@ fn cmd_prove_transfer(args: &[String]) -> Result<(), String> {
 
 fn cmd_prove_withdraw(args: &[String]) -> Result<(), String> {
     let flags = parse_flags(args)?;
-    let proving_key = load_proving_key(one(&flags, "proving-key")?)?;
+    let proving_key = load_proving_key(std::path::Path::new(one(&flags, "proving-key")?))?;
     let commitments = load_commitments(one(&flags, "commitments")?)?;
     let spend = Spend::try_parse(one(&flags, "spend")?)?;
     let recipient_binding = parse_fr(one(&flags, "recipient-binding")?)?;

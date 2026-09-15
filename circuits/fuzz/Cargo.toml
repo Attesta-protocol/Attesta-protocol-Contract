@@ -1,0 +1,43 @@
+[package]
+name = "attesta-circuits-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = "1"
+
+[dependencies.attesta-circuits]
+path = ".."
+
+[[bin]]
+name = "parse_vk_hex"
+path = "fuzz_targets/parse_vk_hex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fr_from_bytes"
+path = "fuzz_targets/fr_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "g1_from_bytes"
+path = "fuzz_targets/g1_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "g2_from_bytes"
+path = "fuzz_targets/g2_from_bytes.rs"
+test = false
+doc = false
+bench = false
