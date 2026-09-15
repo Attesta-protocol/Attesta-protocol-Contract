@@ -5,10 +5,10 @@
 //! against these keys, so this registry is the trust root of the
 //! attestation layer.
 //!
-//! - **Timelocked and evented:** additions, removals, and key rotations are
-//!   queued by governance and only executable after the configured delay,
-//!   with events at every step — integrators can watch pending changes
-//!   before they take effect.
+//! - **Timelocked and evented:** additions, removals, key rotations,
+//!   reactivations, and admin handoffs are all queued by governance and
+//!   only executable after the configured delay, with events at every
+//!   step — integrators can watch pending changes before they take effect.
 //! - **Multi-issuer by design:** no single KYC provider becomes a
 //!   chokepoint for the ecosystem.
 //! - **Governance path:** launches under a multi-sig admin; the documented
@@ -46,6 +46,15 @@ pub enum Action {
     AddIssuer(Address, BytesN<32>, String),
     RemoveIssuer(Address),
     RotateKey(Address, BytesN<32>),
+    /// Reinstate a previously removed issuer under its existing (still
+    /// reserved) signing key. `RemoveIssuer` only flips `active`, so the
+    /// issuer's record and key claim survive removal — this is the
+    /// undo path, rather than a dead end that forces a new address.
+    ReactivateIssuer(Address),
+    /// Hand off governance to a new admin address, e.g. migrating to a
+    /// new multi-sig. Timelocked and evented like every other action, so
+    /// a hijacked or careless rotation is visible before it takes effect.
+    RotateAdmin(Address),
 }
 
 #[contracttype]
@@ -100,6 +109,8 @@ pub enum RegistryError {
     IssuerExists = 3,
     UnknownIssuer = 4,
     KeyInUse = 5,
+    /// `ReactivateIssuer` on an issuer that is already active.
+    AlreadyActive = 6,
 }
 
 #[contract]
@@ -172,6 +183,10 @@ impl IssuerRegistry {
             Action::AddIssuer(issuer, key, name) => add_issuer(&env, issuer, key, name),
             Action::RemoveIssuer(issuer) => remove_issuer(&env, issuer),
             Action::RotateKey(issuer, new_key) => rotate_key(&env, issuer, new_key),
+            Action::ReactivateIssuer(issuer) => reactivate_issuer(&env, issuer),
+            Action::RotateAdmin(new_admin) => {
+                env.storage().instance().set(&DataKey::Admin, &new_admin)
+            }
         }
 
         ActionExecuted {
@@ -188,6 +203,12 @@ impl IssuerRegistry {
 
     pub fn get_issuer(env: Env, issuer: Address) -> Option<IssuerInfo> {
         env.storage().persistent().get(&DataKey::Issuer(issuer))
+    }
+
+    /// The current governance admin, for integrators and tests confirming
+    /// a `RotateAdmin` action actually took effect.
+    pub fn admin(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 }
 
@@ -258,6 +279,23 @@ fn rotate_key(env: &Env, issuer: Address, new_key: BytesN<32>) {
         .persistent()
         .remove(&DataKey::KeyOwner(info.signing_key.clone()));
     info.signing_key = new_key;
+    env.storage()
+        .persistent()
+        .set(&DataKey::Issuer(issuer), &info);
+}
+
+fn reactivate_issuer(env: &Env, issuer: Address) {
+    let mut info: IssuerInfo = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Issuer(issuer.clone()))
+        .unwrap_or_else(|| panic_with_error!(env, RegistryError::UnknownIssuer));
+    if info.active {
+        panic_with_error!(env, RegistryError::AlreadyActive);
+    }
+    // The signing key was never released on removal (see `remove_issuer`),
+    // so no re-claim is needed: it simply starts validating again.
+    info.active = true;
     env.storage()
         .persistent()
         .set(&DataKey::Issuer(issuer), &info);

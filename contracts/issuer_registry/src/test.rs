@@ -129,3 +129,82 @@ fn duplicate_signing_key_rejected() {
     advance(&env, DELAY);
     client.execute(&id);
 }
+
+#[test]
+fn reactivated_issuer_resumes_with_same_key() {
+    let (env, client, _) = setup();
+    let issuer = Address::generate(&env);
+    add_issuer(&env, &client, &issuer, key(&env, 1));
+
+    let id = client.queue(&Action::RemoveIssuer(issuer.clone()));
+    advance(&env, DELAY);
+    client.execute(&id);
+    assert!(!client.is_issuer(&issuer));
+    assert!(!client.is_key_active(&key(&env, 1)));
+
+    // Re-adding the same address is a dead end (the record still exists)...
+    let id = client.queue(&Action::AddIssuer(
+        issuer.clone(),
+        key(&env, 2),
+        String::from_str(&env, "Anchor One, again"),
+    ));
+    advance(&env, DELAY);
+    let result = client.try_execute(&id);
+    assert!(result.is_err());
+
+    // ...reactivation is the intended undo, and resumes under the same key
+    // (never released on removal) with no re-claim required.
+    let id = client.queue(&Action::ReactivateIssuer(issuer.clone()));
+    advance(&env, DELAY);
+    client.execute(&id);
+
+    assert!(client.is_issuer(&issuer));
+    assert!(client.is_key_active(&key(&env, 1)));
+    assert!(client.get_issuer(&issuer).unwrap().active);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn reactivating_active_issuer_rejected() {
+    let (env, client, _) = setup();
+    let issuer = Address::generate(&env);
+    add_issuer(&env, &client, &issuer, key(&env, 1));
+
+    let id = client.queue(&Action::ReactivateIssuer(issuer));
+    advance(&env, DELAY);
+    client.execute(&id);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn reactivating_unknown_issuer_rejected() {
+    let (env, client, _) = setup();
+    let id = client.queue(&Action::ReactivateIssuer(Address::generate(&env)));
+    advance(&env, DELAY);
+    client.execute(&id);
+}
+
+#[test]
+fn admin_rotation_hands_off_governance() {
+    let (env, client, admin) = setup();
+    let new_admin = Address::generate(&env);
+    assert_eq!(client.admin(), admin);
+
+    let id = client.queue(&Action::RotateAdmin(new_admin.clone()));
+    assert_eq!(client.admin(), admin); // not yet — still timelocked
+    advance(&env, DELAY);
+    client.execute(&id);
+
+    assert_eq!(client.admin(), new_admin);
+    assert_ne!(client.admin(), admin);
+}
+
+#[test]
+fn admin_rotation_respects_timelock() {
+    let (env, client, _) = setup();
+    let new_admin = Address::generate(&env);
+    let id = client.queue(&Action::RotateAdmin(new_admin));
+    advance(&env, DELAY - 1);
+    let result = client.try_execute(&id);
+    assert!(result.is_err());
+}
